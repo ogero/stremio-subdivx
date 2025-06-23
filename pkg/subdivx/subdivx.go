@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -15,6 +16,8 @@ import (
 )
 
 const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36"
+
+var versionREMatcher = regexp.MustCompile(`>v([0-9.a-z]+)<`)
 
 type customTransport struct {
 	http.RoundTripper
@@ -66,10 +69,33 @@ func Token() (string, string, error) {
 // SearchTitle searches the subtitles for the specified title. A token and cookies are required.
 func SearchTitle(token string, setCookie string, title string) (*SearchTitleResponse, error) {
 
+	webVersion, err := func() (string, error) {
+		res, err := httpClient.Get(`https://www.subdivx.com/`)
+		if err != nil {
+			return "", fmt.Errorf("failed to http.Client.Get: %w", err)
+		}
+		defer res.Body.Close()
+
+		html, err := io.ReadAll(res.Body)
+		if err != nil {
+			return "", fmt.Errorf("failed to io.ReadAll: %w", err)
+		}
+
+		matches := versionREMatcher.FindSubmatch(html)
+		if matches == nil || len(matches) != 2 {
+			return "", fmt.Errorf("failed to regexp.Regexp.FindSubmatch")
+		}
+
+		return fmt.Sprintf("%s", bytes.ReplaceAll(matches[1], []byte("."), []byte(""))), nil
+	}()
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch web version: failed to io.ReadAll: %w", err)
+	}
+
 	formData := url.Values{}
 	formData.Set("tabla", "resultados")
 	formData.Set("filtros", "")
-	formData.Set("buscar396b", title)
+	formData.Set(fmt.Sprintf("buscar%s", webVersion), title)
 	formData.Set("token", token)
 
 	encodedForm := formData.Encode()
