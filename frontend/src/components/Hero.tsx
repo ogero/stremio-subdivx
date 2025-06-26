@@ -45,6 +45,13 @@ const Hero = () => {
                             </button>
                         </Link>
                     </div>
+
+                    <div className="mt-12 p-6 bg-black/30 backdrop-blur-sm rounded-xl border border-gray-700">
+                        <p className="text-gray-300 mb-4">Or manually install it by copying the manifest URL:</p>
+                        <div className="bg-gray-900 p-4 rounded-lg">
+                            <code className="text-purple-400 font-mono">https://stremio-subdivx.xor.ar/manifest.json</code>
+                        </div>
+                    </div>
                 </div>
             </div>
         </section>
