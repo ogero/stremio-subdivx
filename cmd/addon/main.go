@@ -19,12 +19,12 @@ import (
 	"time"
 
 	imdblib "github.com/StalkR/imdb"
+	"github.com/caarlos0/env/v11"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/ogero/stremio-subdivx/frontend"
 	"github.com/ogero/stremio-subdivx/internal/cache"
-	"github.com/ogero/stremio-subdivx/internal/config"
 	"github.com/ogero/stremio-subdivx/pkg/imdb"
 	"github.com/ogero/stremio-subdivx/pkg/stremio"
 	"github.com/ogero/stremio-subdivx/pkg/subdivx"
@@ -45,10 +45,21 @@ var manifest = stremio.Manifest{
 	Resources:   []string{"subtitles"},
 }
 
+type config struct {
+	AddonHost        string `env:"ADDON_HOST" envDefault:"http://127.0.0.1:3593"`
+	ServerListenAddr string `env:"SERVER_LISTEN_ADDR" envDefault:":3593"`
+}
+type configAddonHostCtxKey struct{}
+
 func main() {
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	cfg, err := env.ParseAs[config]()
+	if err != nil {
+		log.Fatal(fmt.Errorf("failed to env.ParseAs: %w", err))
+	}
 
 	distFS, err := fs.Sub(fs.FS(frontend.Dist), "dist")
 	if err != nil {
@@ -58,6 +69,7 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Logger)
+	r.Use(middleware.WithValue(configAddonHostCtxKey{}, cfg.AddonHost))
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: []string{"*"},
 		AllowedMethods: []string{"GET"},
@@ -79,12 +91,12 @@ func main() {
 
 	// Listen
 	srv := &http.Server{
-		Addr:    config.ServerListenAddr,
+		Addr:    cfg.ServerListenAddr,
 		Handler: r,
 	}
 	go func() {
-		log.Println("Listening on", config.ServerListenAddr)
-		log.Println("Install at", fmt.Sprintf("%s/manifest.json", config.AddonHost))
+		log.Println("Listening on", cfg.ServerListenAddr)
+		log.Println("Install at", fmt.Sprintf("%s/manifest.json", cfg.AddonHost))
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Println("Failed to http.Server.ListenAndServe:", err)
 		}
@@ -197,11 +209,12 @@ func subtitlesHandler(w http.ResponseWriter, r *http.Request) {
 	log.Println("Subdivx cache op:", cacheOp)
 
 	subs := make([]stremio.Subtitle, 0, len(searchTitleResponse.AaData))
+	addonHost := r.Context().Value(configAddonHostCtxKey{}).(string)
 	for _, sub := range searchTitleResponse.AaData {
 		subs = append(subs, stremio.Subtitle{
 			ID:   strconv.Itoa(sub.ID),
 			Lang: `spa`,
-			URL:  fmt.Sprintf("%s/subdivx/%d", config.AddonHost, sub.ID),
+			URL:  fmt.Sprintf("%s/subdivx/%d", addonHost, sub.ID),
 		})
 	}
 
