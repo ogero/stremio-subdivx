@@ -11,6 +11,7 @@ run:
 	@go run cmd/addon/*
 
 build:
+	mkdir -p frontend/dist && touch frontend/dist/index.html
 	@CGO_ENABLED=0 go build -o .bin/$(APP) cmd/addon/*
 
 docker-build:

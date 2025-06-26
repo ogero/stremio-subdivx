@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"net/url"
@@ -21,6 +22,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/ogero/stremio-subdivx/frontend"
 	"github.com/ogero/stremio-subdivx/internal/cache"
 	"github.com/ogero/stremio-subdivx/internal/config"
 	"github.com/ogero/stremio-subdivx/pkg/imdb"
@@ -35,20 +37,23 @@ import (
 var manifest = stremio.Manifest{
 	ID:          "ar.xor.subdivx.go",
 	Version:     "0.0.1",
-	Name:        "Subdivx subtitles",
-	Description: "Addon for getting subtitles from Subdivx",
+	Name:        "Subdivx",
+	Description: "Subdivx subtitles addon",
 	Types:       []string{"movie", "series"},
 	Catalogs:    []stremio.CatalogItem{},
 	IDPrefixes:  []string{"tt"},
 	Resources:   []string{"subtitles"},
 }
 
-const cacheDefaultMaxAge = 48 * time.Hour
-
 func main() {
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	distFS, err := fs.Sub(fs.FS(frontend.Dist), "dist")
+	if err != nil {
+		log.Fatal(fmt.Errorf("failed to fs.Sub: %w", err))
+	}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -66,10 +71,10 @@ func main() {
 		},
 		MaxAge: 300,
 	}))
-	r.Get("/", homeHandler)
 	r.Get("/manifest.json", manifestHandler)
 	r.Get("/subtitles/{type}/{id}/*", subtitlesHandler)
 	r.Get("/subdivx/{id}", subdivxSRTHandler)
+	r.Handle("/*", http.FileServer(http.FS(distFS)))
 
 	// Listen
 	srv := &http.Server{
@@ -97,12 +102,6 @@ func main() {
 	}
 
 	log.Println("Bye!")
-}
-
-func homeHandler(w http.ResponseWriter, _ *http.Request) {
-	jr, _ := json.Marshal(map[string]any{"Path": '/'})
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write(jr)
 }
 
 func manifestHandler(w http.ResponseWriter, _ *http.Request) {
@@ -142,7 +141,7 @@ func subtitlesHandler(w http.ResponseWriter, r *http.Request) {
 	log.Println("Stremio requested imdb id:", imdbID, " season number:", seasonNumber, " and episode number:", episodeNumber)
 
 	cacheOp := "hit"
-	imdbTitle, err := cache.Memoize[imdblib.Title](fmt.Sprintf("imdb.title : %s", imdbID), cacheDefaultMaxAge, func(s string) (*imdblib.Title, error) {
+	imdbTitle, err := cache.Memoize[imdblib.Title](fmt.Sprintf("imdb.title : %s", imdbID), 48*time.Hour, func(s string) (*imdblib.Title, error) {
 
 		cacheOp = "miss"
 		imdbTitle, err := imdb.FetchTitle(imdbID)
@@ -165,7 +164,7 @@ func subtitlesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cacheOp = "hit"
-	searchTitleResponse, err := cache.Memoize[subdivx.SearchTitleResponse](fmt.Sprintf("subdivx.title : %s", subdivxSearchTerm), cacheDefaultMaxAge, func(s string) (*subdivx.SearchTitleResponse, error) {
+	searchTitleResponse, err := cache.Memoize[subdivx.SearchTitleResponse](fmt.Sprintf("subdivx.title : %s", subdivxSearchTerm), 24*time.Hour, func(s string) (*subdivx.SearchTitleResponse, error) {
 
 		cacheOp = "miss"
 		subdivxToken, subdivxCookie, err := subdivx.Token()
@@ -212,6 +211,7 @@ func subtitlesHandler(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("CDN-Cache-Control", "public, max-age=120")
 		w.Header().Set("Cache-Control", "public, max-age=120")
 	}
+
 	response := map[string]interface{}{"subtitles": subs}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(response)

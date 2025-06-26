@@ -1,0 +1,1 @@
+# Subdivx Addon for Stremio frontend
