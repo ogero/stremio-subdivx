@@ -205,6 +205,13 @@ func subtitlesHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	if imdbTitle.Year < time.Now().Year()-1 && len(subs) > 1 {
+		w.Header().Set("CDN-Cache-Control", "public, max-age=1296000")
+		w.Header().Set("Cache-Control", "public, max-age=1296000")
+	} else {
+		w.Header().Set("CDN-Cache-Control", "public, max-age=120")
+		w.Header().Set("Cache-Control", "public, max-age=120")
+	}
 	response := map[string]interface{}{"subtitles": subs}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(response)
@@ -227,6 +234,8 @@ func subdivxSRTHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", fmt.Sprintf("text/plain; charset=%s", consts.UTF8))
+	w.Header().Set("CDN-Cache-Control", "public, max-age=1296000")
+	w.Header().Set("Cache-Control", "public, max-age=1296000")
 
 	switch chardet.Detect(srtByID).Encoding {
 	case consts.UTF8:
