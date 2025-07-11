@@ -1,7 +1,9 @@
 
 import {  Heart } from "lucide-react";
+import LanguagePicker from "@/components/LanguagePicker.tsx";
+import {withTranslation} from "react-i18next";
 
-const Footer = () => {
+const Footer = ({t}) => {
   return (
     <footer className="bg-black border-t border-gray-800">
       <div className="container mx-auto px-4 py-12">
@@ -14,18 +16,19 @@ const Footer = () => {
               <span className="text-white font-bold text-xl">Subdivx</span>
             </div>
               <p className="text-gray-400 leading-relaxed max-w-md">
-                  We are not affiliated, associated, authorized, endorsed by, or in any way officially connected with Subdivx.com.
+                {t('Disclaimer')}
               </p>
               <p className="text-gray-400 leading-relaxed max-w-md">
-                  Use at your own risk.
+                {t('Use at your own risk.')}
               </p>
           </div>
 
           <div>
             <h3 className="text-white font-semibold mb-4">Etc.</h3>
             <ul className="space-y-2">
+              <li><LanguagePicker/></li>
               <li><a href={'https://www.stremio.com/'} rel={'noopener'} target={'_blank'} className="text-gray-400 hover:text-white transition-colors">Stremio.com</a></li>
-              <li><a href={'https://cafecito.app/ogero'} rel={'noopener'} target={'_blank'} className="text-gray-400 hover:text-white transition-colors">Donate</a></li>
+              <li><a href={'https://cafecito.app/ogero'} rel={'noopener'} target={'_blank'} className="text-gray-400 hover:text-white transition-colors">{t('Donate')}</a></li>
             </ul>
           </div>
 
@@ -36,9 +39,9 @@ const Footer = () => {
             &nbsp;
           </p>
           <div className="flex items-center space-x-1 text-gray-400 text-sm mt-4 md:mt-0">
-            <span>Made with</span>
+            <span>{t('Made with')}</span>
             <Heart size={16} className="text-red-500 fill-current" />
-            <span>for the Stremio community</span>
+            <span>{t('for the Stremio community')}</span>
           </div>
         </div>
       </div>
@@ -46,4 +49,5 @@ const Footer = () => {
   );
 };
 
-export default Footer;
+
+export default withTranslation()(Footer);
