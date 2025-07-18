@@ -1,0 +1,158 @@
+services:
+
+  stremio-subdivx:
+    container_name: stremio-subdivx
+    build: .
+    restart: unless-stopped
+    environment:
+      - SERVICE_ENVIRONMENT=dk
+      - OTEL_EXPORTER_ENDPOINT=otel-collector:4317
+    ports:
+      - "3593:3593" # stremio-subdivx
+    volumes:
+      - ./.cache:/app/.cache
+
+  grafana:
+    image: grafana/grafana:12.0.2
+    container_name: grafana
+    user: root
+    environment:
+      - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+      - "3000:3000" # grafana
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: prometheus
+    user: root
+    restart: unless-stopped
+    entrypoint: "prometheus --config.file=/static_configs/prometheus.yaml --storage.tsdb.path=/prometheus/data --web.enable-remote-write-receiver"
+    ports:
+      - "9090:9090" # prometheus
+    volumes:
+      - shared:/static_configs
+      - prometheus_data:/prometheus/data
+    depends_on:
+      - busybox
+
+  tempo:
+    image: grafana/tempo:main-80881d3
+    container_name: tempo
+    restart: unless-stopped
+    entrypoint: "/tempo -config.file=/static_configs/tempo.yaml"
+    ports:
+      - "3200"  # tempo
+      - "4317"  # otlp grpc
+    volumes:
+      - shared:/static_configs
+      - tempo_data:/var/tempo
+    depends_on:
+      - busybox
+
+  loki:
+    image: grafana/loki:3.4.1
+    container_name: loki
+    ports:
+      - "3100:3100"
+    command: ["-config.file","/etc/loki/local-config.yaml"]
+    volumes:
+      - loki_data:/loki
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.130.0
+    container_name: otel-collector
+    restart: unless-stopped
+    ports:
+      - "13133:13133"   # health_check extension
+      - "4317:4317"   # otlp grpc
+    command: ["--config", "/static_configs/otelcol-config.yaml"]
+    volumes:
+      - shared:/static_configs
+    depends_on:
+      - busybox
+
+  busybox:
+    image: busybox:1.37.0
+    container_name: busybox
+    restart: no
+    environment:
+      PROMETHEUS_CONFIG: |
+        global:
+          scrape_interval:      5s
+          evaluation_interval:  5s
+      TEMPO_CONFIG: |
+        server:
+          http_listen_port: 3200
+          register_instrumentation: false
+        distributor:
+          receivers:
+            otlp:
+              protocols:
+                grpc:
+                  endpoint: 0.0.0.0:4317
+        compactor:
+          disabled: true
+        storage:
+          trace:
+            backend: local
+            wal:
+              path: /var/tempo/wal
+            local:
+              path: /var/tempo/blocks
+      OTEL_COLLECTOR_CONFIG: |
+        receivers:
+          otlp:
+            protocols:
+              grpc:
+                endpoint: "0.0.0.0:4317"
+        processors:
+          batch:
+        exporters:
+          debug:
+          otlp:
+            endpoint: "tempo:4317"
+            tls:
+              insecure: true
+          prometheusremotewrite:
+            endpoint: http://prometheus:9090/api/v1/write
+            tls:
+              insecure: true
+          otlphttp:
+            endpoint: "http://loki:3100/otlp"
+            tls:
+              insecure: true
+        extensions:
+          health_check:
+        service:
+          extensions: [health_check]
+          pipelines:
+            traces:
+              receivers: [otlp]
+              processors: [batch]
+              exporters: [otlp, debug]
+            metrics:
+              receivers: [otlp]
+              processors: [batch]
+              exporters: [prometheusremotewrite]
+            logs:
+              receivers: [otlp]
+              processors: [batch]
+              exporters: [otlphttp]
+    entrypoint: |
+      /bin/sh -c "\
+        echo \"$$PROMETHEUS_CONFIG\" > /static_configs/prometheus.yaml; \
+        echo \"$$TEMPO_CONFIG\" > /static_configs/tempo.yaml; \
+        echo \"$$OTEL_COLLECTOR_CONFIG\" > /static_configs/otelcol-config.yaml; \
+        trap : TERM INT; sleep infinity & wait; \
+      "
+    volumes:
+      - shared:/static_configs
+
+volumes:
+  shared:
+  prometheus_data:
+  tempo_data:
+  loki_data:
+  grafana_data:

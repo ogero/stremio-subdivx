@@ -1,55 +1,41 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
+	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
-	imdblib "github.com/StalkR/imdb"
 	"github.com/caarlos0/env/v11"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/ogero/stremio-subdivx/frontend"
+	"github.com/ogero/stremio-subdivx/internal"
 	"github.com/ogero/stremio-subdivx/internal/cache"
+	"github.com/ogero/stremio-subdivx/internal/common"
 	"github.com/ogero/stremio-subdivx/pkg/imdb"
-	"github.com/ogero/stremio-subdivx/pkg/stremio"
 	"github.com/ogero/stremio-subdivx/pkg/subdivx"
-	"github.com/wlynxg/chardet"
-	"github.com/wlynxg/chardet/consts"
-	"golang.org/x/text/encoding/charmap"
-	"golang.org/x/text/transform"
+	slogchi "github.com/samber/slog-chi"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-var manifest = stremio.Manifest{
-	ID:          "ar.xor.subdivx.go",
-	Version:     "0.0.1",
-	Name:        "Subdivx",
-	Description: "Subdivx subtitles addon",
-	Types:       []string{"movie", "series"},
-	Catalogs:    []stremio.CatalogItem{},
-	IDPrefixes:  []string{"tt"},
-	Resources:   []string{"subtitles"},
-}
-
 type config struct {
-	AddonHost        string `env:"ADDON_HOST" envDefault:"http://127.0.0.1:3593"`
-	ServerListenAddr string `env:"SERVER_LISTEN_ADDR" envDefault:":3593"`
+	AddonHost            string `env:"ADDON_HOST" envDefault:"http://127.0.0.1:3593"`
+	ServerListenAddr     string `env:"SERVER_LISTEN_ADDR" envDefault:":3593"`
+	ServiceName          string `env:"SERVICE_NAME" envDefault:"stremio-subdivx"`
+	ServiceEnvironment   string `env:"SERVICE_ENVIRONMENT" envDefault:"lcl"`
+	ServiceVersion       string `env:"SERVICE_VERSION" envDefault:"v0.0.1"`
+	OtelExporterEndpoint string `env:"OTEL_EXPORTER_ENDPOINT" envDefault:"127.0.0.1:4317"`
 }
-type configAddonHostCtxKey struct{}
 
 func main() {
 
@@ -58,18 +44,54 @@ func main() {
 
 	cfg, err := env.ParseAs[config]()
 	if err != nil {
-		log.Fatal(fmt.Errorf("failed to env.ParseAs: %w", err))
+		panic(fmt.Errorf("failed to env.ParseAs: %w", err))
 	}
+
+	loggerShutdown, err := common.InitLogger(cfg.ServiceName, cfg.ServiceVersion, cfg.ServiceEnvironment, cfg.OtelExporterEndpoint)
+	if err != nil {
+		panic(fmt.Errorf("failed to logger.InitLogger: %w", err))
+	}
+
+	err = cache.InitCache(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		common.Log.Error("Failed to cache.InitCache", "err", err)
+		os.Exit(1)
+	}
+
+	instrumentationShutdown, err := common.InitInstrumentation(cfg.ServiceName, cfg.ServiceVersion, cfg.ServiceEnvironment, cfg.OtelExporterEndpoint)
+	if err != nil {
+		common.Log.Error("Failed to common.InitInstrumentation", "err", err)
+		os.Exit(1)
+	}
+
+	stremioService := internal.NewStremioService(
+		imdb.NewStalkrIMDB(),
+		subdivx.NewSubdivx())
+	app := internal.NewApp(stremioService, cfg.AddonHost)
 
 	distFS, err := fs.Sub(fs.FS(frontend.Dist), "dist")
 	if err != nil {
-		log.Fatal(fmt.Errorf("failed to fs.Sub: %w", err))
+		common.Log.Error("Failed to fs.Sub", "err", err)
+	}
+
+	handlersFilter := func(r *http.Request) bool {
+		if r.Method == http.MethodGet &&
+			(r.URL.Path == "/" ||
+				r.URL.Path == "/manifest.json" ||
+				strings.HasPrefix(r.URL.Path, "/subtitles/") ||
+				strings.HasPrefix(r.URL.Path, "/subdivx/")) {
+			return true
+		}
+		return false
 	}
 
 	r := chi.NewRouter()
+	r.Use(slogchi.NewWithConfig(common.Log.WithGroup("http"), slogchi.Config{
+		Filters: []slogchi.Filter{func(_ middleware.WrapResponseWriter, r *http.Request) bool {
+			return handlersFilter(r)
+		}},
+	}))
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Logger)
-	r.Use(middleware.WithValue(configAddonHostCtxKey{}, cfg.AddonHost))
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: []string{"*"},
 		AllowedMethods: []string{"GET"},
@@ -84,21 +106,25 @@ func main() {
 		},
 		MaxAge: 300,
 	}))
-	r.Get("/manifest.json", manifestHandler)
-	r.Get("/subtitles/{type}/{id}/*", subtitlesHandler)
-	r.Get("/subdivx/{id}", subdivxSRTHandler)
+	r.Handle("GET /manifest.json", otelhttp.WithRouteTag("/manifest.json", http.HandlerFunc(app.ManifestHandler)))
+	r.Handle("GET /subtitles/{type}/{id}/*", otelhttp.WithRouteTag("/subtitles/{type}/{id}/*", http.HandlerFunc(app.SubtitlesHandler)))
+	r.Handle("GET /subdivx/{id}", otelhttp.WithRouteTag("/subdivx/{id}", http.HandlerFunc(app.SubdivxSubtitleHandler)))
 	r.Handle("/*", http.FileServer(http.FS(distFS)))
 
-	// Listen
-	srv := &http.Server{
-		Addr:    cfg.ServerListenAddr,
-		Handler: r,
+	// Listen app
+	appSrv := &http.Server{
+		Addr: cfg.ServerListenAddr,
+		Handler: otelhttp.NewHandler(r, "server",
+			otelhttp.WithMessageEvents(otelhttp.ReadEvents, otelhttp.WriteEvents),
+			otelhttp.WithFilter(func(r *http.Request) bool {
+				return handlersFilter(r)
+			}),
+		),
 	}
 	go func() {
-		log.Println("Listening on", cfg.ServerListenAddr)
-		log.Println("Install at", fmt.Sprintf("%s/manifest.json", cfg.AddonHost))
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Println("Failed to http.Server.ListenAndServe:", err)
+		common.Log.Info("App started", "Addr", appSrv.Addr, "Host", cfg.AddonHost)
+		if err := appSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			common.Log.Error("Failed to http.Server.ListenAndServe", "err", err)
 		}
 	}()
 
@@ -106,164 +132,22 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Println("Failed to http server shutdown:", err)
+
+	if err := appSrv.Shutdown(ctx); err != nil {
+		common.Log.Error("Failed to http.Server.Shutdown", "err", err)
 	}
 
 	if err := cache.Close(); err != nil {
-		log.Println("Failed to cache.Close:", err)
+		common.Log.Error("Failed to cache.Close", "err", err)
 	}
 
-	log.Println("Bye!")
-}
-
-func manifestHandler(w http.ResponseWriter, _ *http.Request) {
-	jr, _ := json.Marshal(manifest)
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write(jr)
-}
-
-func subtitlesHandler(w http.ResponseWriter, r *http.Request) {
-	paramsType := chi.URLParam(r, "type")
-	if paramsType != "movie" && paramsType != "series" {
-		log.Println("Invalid subtitles type:", paramsType)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
+	if instrumentationShutdown != nil {
+		instrumentationShutdown(ctx)
 	}
 
-	paramsID := chi.URLParam(r, "id")
-	if !strings.HasPrefix(paramsID, "tt") {
-		log.Println("Invalid subtitle id:", paramsID)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
+	if loggerShutdown != nil {
+		_ = loggerShutdown(ctx)
 	}
 
-	paramsID, err := url.PathUnescape(paramsID)
-	if err != nil {
-		log.Println("Failed to url.PathUnescape:", err)
-	}
-
-	var imdbID string
-	var seasonNumber, episodeNumber int
-	paramsIds := strings.Split(paramsID, ":")
-	imdbID = paramsIds[0]
-	if len(paramsIds) > 1 {
-		seasonNumber, _ = strconv.Atoi(paramsIds[1])
-		episodeNumber, _ = strconv.Atoi(paramsIds[2])
-	}
-	log.Println("Stremio requested imdb id:", imdbID, " season number:", seasonNumber, " and episode number:", episodeNumber)
-
-	cacheOp := "hit"
-	imdbTitle, err := cache.Memoize[imdblib.Title](fmt.Sprintf("imdb.title : %s", imdbID), 48*time.Hour, func(s string) (*imdblib.Title, error) {
-
-		cacheOp = "miss"
-		imdbTitle, err := imdb.FetchTitle(imdbID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to FetchIMDBTitle: %w", err)
-		}
-
-		return imdbTitle, nil
-	})
-	if err != nil {
-		log.Println("Failed to fetch imdb title:", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	log.Println("IMDB cache op:", cacheOp)
-
-	subdivxSearchTerm := imdbTitle.Name
-	if seasonNumber != 0 && episodeNumber != 0 {
-		subdivxSearchTerm = fmt.Sprintf("%s S%02dE%02d", imdbTitle.Name, seasonNumber, episodeNumber)
-	}
-
-	cacheOp = "hit"
-	searchTitleResponse, err := cache.Memoize[subdivx.SearchTitleResponse](fmt.Sprintf("subdivx.title : %s", subdivxSearchTerm), 24*time.Hour, func(s string) (*subdivx.SearchTitleResponse, error) {
-
-		cacheOp = "miss"
-		subdivxToken, subdivxCookie, err := subdivx.Token()
-		if err != nil {
-			return nil, fmt.Errorf("failed to subdivx.Token: %w", err)
-		}
-		log.Println("Got subdivx token:", subdivxToken, " and cookie:", subdivxCookie)
-
-		log.Println("Fetching subdivx subtitles for:", subdivxSearchTerm)
-		searchTitleResponse, err := subdivx.SearchTitle(subdivxToken, subdivxCookie, subdivxSearchTerm)
-		if err != nil {
-			return nil, fmt.Errorf("failed to subdivx.SearchTitle: %w", err)
-		}
-		log.Println("Got subdivx subs:", searchTitleResponse.ITotalRecords, " (", func() string {
-			var subs []string
-			for _, sub := range searchTitleResponse.AaData {
-				subs = append(subs, strconv.Itoa(sub.ID))
-			}
-			return strings.Join(subs, ", ")
-		}(), ")")
-
-		return searchTitleResponse, nil
-	})
-	if err != nil {
-		log.Println("Failed to fetch subdivx subs:", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	log.Println("Subdivx cache op:", cacheOp)
-
-	subs := make([]stremio.Subtitle, 0, len(searchTitleResponse.AaData))
-	addonHost := r.Context().Value(configAddonHostCtxKey{}).(string)
-	for _, sub := range searchTitleResponse.AaData {
-		subs = append(subs, stremio.Subtitle{
-			ID:   strconv.Itoa(sub.ID),
-			Lang: `spa`,
-			URL:  fmt.Sprintf("%s/subdivx/%d", addonHost, sub.ID),
-		})
-	}
-
-	if imdbTitle.Year < time.Now().Year()-1 && len(subs) > 1 {
-		w.Header().Set("CDN-Cache-Control", "public, max-age=1296000")
-		w.Header().Set("Cache-Control", "public, max-age=1296000")
-	} else {
-		w.Header().Set("CDN-Cache-Control", "public, max-age=120")
-		w.Header().Set("Cache-Control", "public, max-age=120")
-	}
-
-	response := map[string]interface{}{"subtitles": subs}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(response)
-}
-
-func subdivxSRTHandler(w http.ResponseWriter, r *http.Request) {
-
-	paramsID := chi.URLParam(r, "id")
-	if _, err := strconv.Atoi(paramsID); err != nil {
-		log.Println("Invalid subtitle id:", paramsID)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	srtByID, err := subdivx.DownloadSRTByID(paramsID)
-	if err != nil {
-		log.Println("Failed to subdivx.DownloadSRTByID:", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", fmt.Sprintf("text/plain; charset=%s", consts.UTF8))
-	w.Header().Set("CDN-Cache-Control", "public, max-age=1296000")
-	w.Header().Set("Cache-Control", "public, max-age=1296000")
-
-	switch chardet.Detect(srtByID).Encoding {
-	case consts.UTF8:
-		_, err = w.Write(srtByID)
-	case consts.ISO88591:
-		tr := transform.NewReader(bytes.NewReader(srtByID), charmap.ISO8859_1.NewDecoder())
-		_, err = io.Copy(w, tr)
-	default:
-		_, err = w.Write(srtByID)
-	}
-
-	if err != nil {
-		log.Println("Failed to send response:", err)
-		return
-	}
-
+	common.Log.Info("Bye!")
 }

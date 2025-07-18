@@ -24,3 +24,9 @@ type Subtitle struct {
 	Lang string `json:"lang"`
 	URL  string `json:"url"`
 }
+
+// Subtitles represents a collection of subtitle entries.
+// Each entry contains details about the subtitle such as ID, language, and URL.
+type Subtitles struct {
+	Subtitles []Subtitle `json:"subtitles"`
+}

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/dgraph-io/badger/v4"
@@ -14,26 +14,29 @@ var cacheDefaultPath = ".cache"
 
 var badgerDB *badger.DB
 
-func init() {
+// InitCache initializes the app global cache
+func InitCache(logger *slog.Logger) error {
 
 	var err error
 	badgerDB, err = badger.Open(
 		badger.DefaultOptions(cacheDefaultPath).
 			WithNumVersionsToKeep(0).
 			WithValueLogFileSize(1024 * 1024 * 100).
-			WithLogger(&l{}),
+			WithLogger(&l{logger: logger}),
 	)
 	if err != nil {
-		log.Fatal("Failed to initialize cache:", err)
+		return fmt.Errorf("failed to initialize badger database: %w", err)
 	}
+
+	return nil
 }
 
 // Memoize retrieves a cached value for the specified cacheKey.
 // If the value is present and its type matches, it is returned. Otherwise, the provided function fn
-// is called with cacheKey as its argument to compute the value, which is then stored in the cache
-// with the specified expiration and returned. If the cached value has an unexpected type or if fn returns an error,
+// is called to compute the value, which is then stored in the cache with the specified expiration
+// and returned. If the cached value has an unexpected type or if fn returns an error,
 // Memoize returns the corresponding error.
-func Memoize[V any](cacheKey string, ttl time.Duration, fn func(string) (*V, error)) (*V, error) {
+func Memoize[V any](cacheKey string, ttl time.Duration, fn func() (*V, error)) (*V, error) {
 
 	value := new(V)
 
@@ -58,7 +61,7 @@ func Memoize[V any](cacheKey string, ttl time.Duration, fn func(string) (*V, err
 		return value, nil
 	}
 
-	value, err = fn(cacheKey)
+	value, err = fn()
 	if err != nil {
 		return nil, err
 	}
@@ -83,20 +86,22 @@ func Close() error {
 	return badgerDB.Close()
 }
 
-type l struct{}
+type l struct {
+	logger *slog.Logger
+}
 
 func (l *l) Errorf(s string, i ...interface{}) {
-	log.Printf(s, i...)
+	l.logger.Error(fmt.Sprintf(s, i...))
 }
 
 func (l *l) Warningf(s string, i ...interface{}) {
-	log.Printf(s, i...)
+	l.logger.Warn(fmt.Sprintf(s, i...))
 }
 
 func (l *l) Infof(s string, i ...interface{}) {
-	log.Printf(s, i...)
+	l.logger.Info(fmt.Sprintf(s, i...))
 }
 
 func (l *l) Debugf(s string, i ...interface{}) {
-	log.Printf(s, i...)
+	l.logger.Debug(fmt.Sprintf(s, i...))
 }
