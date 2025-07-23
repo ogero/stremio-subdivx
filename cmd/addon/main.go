@@ -33,7 +33,7 @@ type config struct {
 	ServerListenAddr     string `env:"SERVER_LISTEN_ADDR" envDefault:":3593"`
 	ServiceName          string `env:"SERVICE_NAME" envDefault:"stremio-subdivx"`
 	ServiceEnvironment   string `env:"SERVICE_ENVIRONMENT" envDefault:"lcl"`
-	ServiceVersion       string `env:"SERVICE_VERSION" envDefault:"v0.0.1"`
+	ServiceVersion       string `env:"SERVICE_VERSION" envDefault:"v0.0.2"`
 	OtelExporterEndpoint string `env:"OTEL_EXPORTER_ENDPOINT" envDefault:"127.0.0.1:4317"`
 }
 

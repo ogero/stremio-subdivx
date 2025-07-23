@@ -241,6 +241,11 @@ func (s *subdivx) GetSubtitle(ctx context.Context, ID string) (*Subtitle, error)
 		// RAR 5.0
 		bytes.HasPrefix(subCompressedFileContents, []byte("Rar!\x1A\x07\x01\x00"))
 
+	isSubtitle := func(filename string) bool {
+		lcFilename := strings.ToLower(filename)
+		return strings.HasSuffix(lcFilename, ".srt")
+	}
+
 	var sub *Subtitle
 	switch {
 	case isZip:
@@ -252,7 +257,7 @@ func (s *subdivx) GetSubtitle(ctx context.Context, ID string) (*Subtitle, error)
 
 			var srtFile *zip.File
 			for _, file := range zr.File {
-				if strings.HasSuffix(strings.ToLower(file.Name), ".srt") {
+				if isSubtitle(file.Name) {
 					srtFile = file
 					break
 				}
@@ -263,13 +268,13 @@ func (s *subdivx) GetSubtitle(ctx context.Context, ID string) (*Subtitle, error)
 
 			rc, err := srtFile.Open()
 			if err != nil {
-				return nil, fmt.Errorf("failed to open SRT in ZIP: %v", err)
+				return nil, fmt.Errorf("failed to open SRT in ZIP: %w", err)
 			}
 			defer rc.Close()
 
 			data, err := io.ReadAll(rc)
 			if err != nil {
-				return nil, fmt.Errorf("failed read SRT in ZIP: %v", err)
+				return nil, fmt.Errorf("failed read SRT in ZIP: %w", err)
 			}
 
 			return &Subtitle{
@@ -290,13 +295,13 @@ func (s *subdivx) GetSubtitle(ctx context.Context, ID string) (*Subtitle, error)
 					break
 				}
 				if err != nil {
-					return nil, fmt.Errorf("failed to read RAR: %v", err)
+					return nil, fmt.Errorf("failed to read RAR: %w", err)
 				}
-				if strings.HasSuffix(strings.ToLower(header.Name), ".srt") {
+				if isSubtitle(header.Name) {
 
 					data, err := io.ReadAll(rr)
 					if err != nil {
-						return nil, fmt.Errorf("failed read SRT in RAR: %v", err)
+						return nil, fmt.Errorf("failed read SRT in RAR: %w", err)
 					}
 
 					return &Subtitle{
@@ -311,7 +316,7 @@ func (s *subdivx) GetSubtitle(ctx context.Context, ID string) (*Subtitle, error)
 		return nil, fmt.Errorf("unknown archive format (not ZIP or RAR)")
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to decompress archive (not ZIP or RAR)")
+		return nil, fmt.Errorf("failed to process subtitle archive: %w", err)
 	}
 
 	return sub, nil
