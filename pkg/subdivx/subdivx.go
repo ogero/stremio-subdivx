@@ -140,7 +140,7 @@ func (s *subdivx) GetSubtitles(ctx context.Context, token *Token, title string) 
 			return "", fmt.Errorf("failed to regexp.Regexp.FindSubmatch")
 		}
 
-		return fmt.Sprintf("%s", bytes.ReplaceAll(matches[1], []byte("."), []byte(""))), nil
+		return string(bytes.ReplaceAll(matches[1], []byte("."), []byte(""))), nil
 	}()
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch web version: failed to io.ReadAll: %w", err)

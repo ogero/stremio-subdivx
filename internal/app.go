@@ -24,7 +24,7 @@ import (
 
 var manifest = stremio.Manifest{
 	ID:          "ar.xor.subdivx.go",
-	Version:     "0.0.1",
+	Version:     "0.0.3",
 	Name:        "Subdivx",
 	Description: "Subdivx subtitles addon",
 	Types:       []string{"movie", "series"},
@@ -121,8 +121,14 @@ func (a *App) SubtitlesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(paramsIds) == 3 {
-		seasonNumber, _ = strconv.Atoi(paramsIds[1])
-		episodeNumber, _ = strconv.Atoi(paramsIds[2])
+		seasonNumber, err = strconv.Atoi(paramsIds[1])
+		if err != nil {
+			common.Log.WarnContext(ctx, "Failed to convert season to a number", "err", err)
+		}
+		episodeNumber, err = strconv.Atoi(paramsIds[2])
+		if err != nil {
+			common.Log.WarnContext(ctx, "Failed to convert episode to a number", "err", err)
+		}
 	}
 
 	subtitles, err := a.StremioService.GetSubtitles(ctx, imdbID, seasonNumber, episodeNumber)

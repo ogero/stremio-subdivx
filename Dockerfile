@@ -1,13 +1,13 @@
 FROM node:18-alpine AS nodebuilder
 WORKDIR /app/frontend
-COPY frontend/package.json frontend/package-lock.json /app/frontend/
+COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
-COPY frontend /app/frontend
+COPY frontend/ ./
 RUN npm run build
 
 FROM golang:1.24 AS gobuilder
 WORKDIR "/app/"
-COPY ["go.mod", "go.sum", "/app/"]
+COPY ["go.mod", "go.sum", "./"]
 RUN go mod download
 COPY --from=nodebuilder /app/frontend/fs.go frontend/
 COPY --from=nodebuilder /app/frontend/dist frontend/dist

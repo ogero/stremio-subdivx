@@ -41,7 +41,7 @@ func NewStalkrIMDB() IMDB {
 // GetTitle gets a Title by its ID.
 func (c *stalkrIMDB) GetTitle(ctx context.Context, imdbID string) (*Title, error) {
 
-	ctx, span := trace.SpanFromContext(ctx).TracerProvider().Tracer("").Start(ctx, "imdb.IMDB.GetTitle")
+	_, span := trace.SpanFromContext(ctx).TracerProvider().Tracer("").Start(ctx, "imdb.IMDB.GetTitle")
 	defer span.End()
 
 	imdbResult, err := c.getTitle(c.httpClient, imdbID)
