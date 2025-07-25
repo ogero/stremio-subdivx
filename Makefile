@@ -8,6 +8,7 @@ test:
 	go test -timeout 10s -race ./...
 
 run:
+	cd frontend && npm run build:dev
 	@go run cmd/addon/*
 
 build:
@@ -20,6 +21,7 @@ docker-build:
 docker-run: docker-build
 	@docker run --rm \
 		-e ADDON_HOST='http://127.0.0.1:3593' \
+		-e LOKI_HOST='http://loki:3100' \
 		-e SERVER_LISTEN_ADDR=':3593' \
 		-p 3593:3593 \
 		-v "./.cache:/app/.cache" \

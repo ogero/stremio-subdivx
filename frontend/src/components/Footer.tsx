@@ -1,9 +1,8 @@
-
-import { Heart } from "lucide-react";
+import {Heart} from "lucide-react";
 import LanguagePicker from "@/components/LanguagePicker.tsx";
 import {withTranslation} from "react-i18next";
 import Logo from "@/components/Logo.tsx";
-import { TFunction } from 'i18next';
+import {TFunction} from 'i18next';
 
 type FooterProps = {
   t: TFunction
@@ -16,12 +15,12 @@ const Footer = ({t}: FooterProps) => {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
           <div className="col-span-1 md:col-span-2">
             <Logo className="mb-4"/>
-              <p className="text-gray-400 leading-relaxed max-w-md">
-                {t('Disclaimer')}
-              </p>
-              <p className="text-gray-400 leading-relaxed max-w-md">
-                {t('Use at your own risk.')}
-              </p>
+            <p className="text-gray-400 leading-relaxed max-w-md">
+              {t('Disclaimer')}
+            </p>
+            <p className="text-gray-400 leading-relaxed max-w-md">
+              {t('Use at your own risk.')}
+            </p>
           </div>
 
           <div>
@@ -41,7 +40,7 @@ const Footer = ({t}: FooterProps) => {
           </p>
           <div className="flex items-center space-x-1 text-gray-400 text-sm mt-4 md:mt-0">
             <span>{t('Made with')}</span>
-            <Heart size={16} className="text-red-500 fill-current" />
+            <Heart size={16} className="text-red-500 fill-current"/>
             <span>{t('for the Stremio community')}</span>
           </div>
         </div>

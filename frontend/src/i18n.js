@@ -17,6 +17,17 @@ const resources = {
             "Use at your own risk.": "Use at your own risk.",
             "Made with": "Made with",
             "for the Stremio community": "for the Stremio community",
+            "What are we": "What are we",
+            "watching": "watching",
+            "take a peek": "Take a peek at some system stats and what we are watching in real time.",
+            "Searches": "Searches",
+            searches_last_24_hours_one: "1 search on the past 24 hours.",
+            searches_last_24_hours_other: "{{count}} searches on the past 24 hours.",
+            "Downloads": "Downloads",
+            downloads_last_24_hours_one: "1 download on the past 24 hours.",
+            downloads_last_24_hours_other: "{{count}} downloads on the past 24 hours.",
+            "Last seen": "Last seen",
+            last_seen_title: "{{title}}.",
         }
     },
     es: {
@@ -33,6 +44,17 @@ const resources = {
             "Use at your own risk.": "Usalo bajo su propio riesgo.",
             "Made with": "Hecho con",
             "for the Stremio community": "para la comunidad de Stremio",
+            "What are we": "¿Que estamos",
+            "watching": "viendo",
+            "take a peek": "Echa un vistazo a algunas estadísticas del sistema y qué ven nuestros usuarios en tiempo real.",
+            "Searches": "Búsquedas",
+            searches_last_24_hours_one: "1 búsqueda en las últimas 24 horas.",
+            searches_last_24_hours_other: "{{count}} búsquedas en las últimas 24 horas.",
+            "Downloads": "Descargas",
+            downloads_last_24_hours_one: "1 descarga en las últimas 24 horas.",
+            downloads_last_24_hours_other: "{{count}} descargas en las últimas 24 horas.",
+            "Last seen": "Recién visto",
+            last_seen_title: "{{title}}.",
         }
     }
 };

@@ -1,5 +1,3 @@
-
-
 import Logo from "@/components/Logo.tsx";
 
 const Header = () => {

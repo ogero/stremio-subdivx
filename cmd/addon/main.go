@@ -22,6 +22,7 @@ import (
 	"github.com/ogero/stremio-subdivx/internal"
 	"github.com/ogero/stremio-subdivx/internal/cache"
 	"github.com/ogero/stremio-subdivx/internal/common"
+	"github.com/ogero/stremio-subdivx/internal/loki"
 	"github.com/ogero/stremio-subdivx/pkg/imdb"
 	"github.com/ogero/stremio-subdivx/pkg/subdivx"
 	slogchi "github.com/samber/slog-chi"
@@ -33,8 +34,10 @@ type config struct {
 	ServerListenAddr     string `env:"SERVER_LISTEN_ADDR" envDefault:":3593"`
 	ServiceName          string `env:"SERVICE_NAME" envDefault:"stremio-subdivx"`
 	ServiceEnvironment   string `env:"SERVICE_ENVIRONMENT" envDefault:"lcl"`
-	ServiceVersion       string `env:"SERVICE_VERSION" envDefault:"v0.0.3"`
+	ServiceVersion       string `env:"SERVICE_VERSION" envDefault:"v0.0.4"`
 	OtelExporterEndpoint string `env:"OTEL_EXPORTER_ENDPOINT" envDefault:"127.0.0.1:4317"`
+	LokiHost             string `env:"LOKI_HOST" envDefault:"http://127.0.0.1:3100"`
+	StatsWSChannel       string `env:"STATS_WS_CHANNEL" envDefault:"stremio-subdivx:stats"`
 }
 
 func main() {
@@ -65,9 +68,19 @@ func main() {
 	}
 
 	stremioService := internal.NewStremioService(
+		cfg.StatsWSChannel,
 		imdb.NewStalkrIMDB(),
-		subdivx.NewSubdivx())
-	app := internal.NewApp(stremioService, cfg.AddonHost)
+		subdivx.NewSubdivx(),
+		loki.NewLoki(cfg.LokiHost),
+	)
+
+	go stremioService.StartPollingStats(1 * time.Minute)
+
+	app, err := internal.NewApp(stremioService, cfg.AddonHost)
+	if err != nil {
+		common.Log.Error("Failed to internal.NewApp", "err", err)
+		os.Exit(1)
+	}
 
 	distFS, err := fs.Sub(fs.FS(frontend.Dist), "dist")
 	if err != nil {
@@ -79,7 +92,8 @@ func main() {
 			(r.URL.Path == "/" ||
 				r.URL.Path == "/manifest.json" ||
 				strings.HasPrefix(r.URL.Path, "/subtitles/") ||
-				strings.HasPrefix(r.URL.Path, "/subdivx/")) {
+				strings.HasPrefix(r.URL.Path, "/subdivx/") ||
+				strings.HasPrefix(r.URL.Path, "/ws")) {
 			return true
 		}
 		return false
@@ -94,7 +108,7 @@ func main() {
 	r.Use(middleware.Recoverer)
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: []string{"*"},
-		AllowedMethods: []string{"GET"},
+		AllowedMethods: []string{"GET", "OPTIONS"},
 		AllowedHeaders: []string{
 			"Content-Type",
 			"X-Requested-With",
@@ -103,12 +117,18 @@ func main() {
 			"Accept-Encoding",
 			"Content-Language",
 			"Origin",
+			"Sec-WebSocket-Version",
+			"Sec-WebSocket-Key",
+			"Sec-WebSocket-Extensions",
+			"Upgrade",
+			"Connection",
 		},
 		MaxAge: 300,
 	}))
 	r.Handle("GET /manifest.json", otelhttp.WithRouteTag("/manifest.json", http.HandlerFunc(app.ManifestHandler)))
 	r.Handle("GET /subtitles/{type}/{id}/*", otelhttp.WithRouteTag("/subtitles/{type}/{id}/*", http.HandlerFunc(app.SubtitlesHandler)))
 	r.Handle("GET /subdivx/{id}", otelhttp.WithRouteTag("/subdivx/{id}", http.HandlerFunc(app.SubdivxSubtitleHandler)))
+	r.Handle("GET /ws", otelhttp.WithRouteTag("/ws", http.HandlerFunc(app.WebsocketHandler)))
 	r.Handle("/*", http.FileServer(http.FS(distFS)))
 
 	// Listen app

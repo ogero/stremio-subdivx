@@ -24,7 +24,7 @@ import (
 
 var manifest = stremio.Manifest{
 	ID:          "ar.xor.subdivx.go",
-	Version:     "0.0.3",
+	Version:     "0.0.4",
 	Name:        "Subdivx",
 	Description: "Subdivx subtitles addon",
 	Types:       []string{"movie", "series"},
@@ -49,11 +49,11 @@ Parameters:
 Returns:
   - A pointer to the newly created App instance.
 */
-func NewApp(stremioService StremioService, addonHost string) *App {
+func NewApp(stremioService StremioService, addonHost string) (*App, error) {
 	return &App{
 		StremioService: stremioService,
 		AddonHost:      addonHost,
-	}
+	}, nil
 }
 
 /*
@@ -215,4 +215,13 @@ func (a *App) SubdivxSubtitleHandler(w http.ResponseWriter, r *http.Request) {
 		span.RecordError(err)
 		return
 	}
+}
+
+// WebsocketHandler handles WebSocket connections
+func (a *App) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	common.Log.DebugContext(ctx, "WebsocketHandler")
+
+	a.StremioService.ServeHTTP(w, r)
 }
