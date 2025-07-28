@@ -12,7 +12,7 @@ require (
 	github.com/nwaples/rardecode v1.1.3
 	github.com/samber/slog-chi v1.15.0
 	github.com/samber/slog-multi v1.4.1
-	github.com/wlynxg/chardet v1.0.2
+	github.com/wlynxg/chardet v1.0.3
 	go.opentelemetry.io/contrib/bridges/otelslog v0.12.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.62.0
 	go.opentelemetry.io/otel v1.37.0
