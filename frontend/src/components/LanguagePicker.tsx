@@ -15,21 +15,21 @@ export default function LanguagePicker() {
 
   return (
     <React.Fragment>
-      <div className="hidden sm:block">
+      <div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" className="flex items-center gap-2">
-              <GlobeIcon className="h-5 w-5"/>
+              <GlobeIcon/>
               <span>{i18n.language.toUpperCase()}</span>
-              <ChevronDownIcon className="h-4 w-4"/>
+              <ChevronDownIcon/>
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuContent align="end">
             <DropdownMenuItem className="flex items-center justify-between" onSelect={() => {
               toggleLanguage()
             }}>
               <span>{i18n.language == 'en' ? 'English' : 'Español'}</span>
-              <CheckIcon className="h-5 w-5"/>
+              <CheckIcon/>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => {
               toggleLanguage()
@@ -41,7 +41,10 @@ export default function LanguagePicker() {
   )
 }
 
-function CheckIcon(props) {
+interface CheckIconProps extends React.SVGProps<SVGSVGElement> {
+}
+
+function CheckIcon(props: CheckIconProps) {
   return (
     <svg
       {...props}
@@ -61,7 +64,7 @@ function CheckIcon(props) {
 }
 
 
-function ChevronDownIcon(props) {
+function ChevronDownIcon(props: CheckIconProps) {
   return (
     <svg
       {...props}
@@ -81,7 +84,7 @@ function ChevronDownIcon(props) {
 }
 
 
-function GlobeIcon(props) {
+function GlobeIcon(props: CheckIconProps) {
   return (
     <svg
       {...props}
@@ -101,4 +104,3 @@ function GlobeIcon(props) {
     </svg>
   )
 }
-
