@@ -27,11 +27,17 @@ type Token struct {
 // Subtitles holds the total number of records and the corresponding IDs of a subset of them.
 type Subtitles struct {
 	TotalRecords int
-	IDs          []int
+	Subtitles    []*Subtitle
+}
+type Subtitle struct {
+	ID               int
+	Title            string
+	Description      string
+	DescriptionWords []string
 }
 
-// Subtitle holds content of a subtitle.
-type Subtitle struct {
+// SubtitleContents holds content of a subtitle.
+type SubtitleContents struct {
 	Name string
 	Data []byte
 }
@@ -43,7 +49,7 @@ type Subdivx interface {
 	// GetSubtitles fetches subtitles for a given title.
 	GetSubtitles(ctx context.Context, token *Token, title string) (*Subtitles, error)
 	// GetSubtitle retrieves a specific subtitle file contents by its ID.
-	GetSubtitle(ctx context.Context, ID string) (*Subtitle, error)
+	GetSubtitle(ctx context.Context, ID string) (*SubtitleContents, error)
 }
 
 // NewSubdivx creates a new instance of the Subdivx service.
@@ -175,7 +181,9 @@ func (s *subdivx) GetSubtitles(ctx context.Context, token *Token, title string) 
 	subdivxResponse := struct {
 		ITotalRecords int `json:"iTotalRecords"`
 		AaData        []struct {
-			ID int `json:"id"`
+			ID          int    `json:"id"`
+			Title       string `json:"titulo"`
+			Description string `json:"descripcion"`
 		} `json:"aaData"`
 	}{}
 
@@ -186,17 +194,22 @@ func (s *subdivx) GetSubtitles(ctx context.Context, token *Token, title string) 
 
 	subtitles := &Subtitles{
 		TotalRecords: subdivxResponse.ITotalRecords,
-		IDs:          make([]int, 0, subdivxResponse.ITotalRecords),
+		Subtitles:    make([]*Subtitle, 0, subdivxResponse.ITotalRecords),
 	}
 	for _, aaData := range subdivxResponse.AaData {
-		subtitles.IDs = append(subtitles.IDs, aaData.ID)
+		subtitles.Subtitles = append(subtitles.Subtitles, &Subtitle{
+			ID:               aaData.ID,
+			Title:            aaData.Title,
+			Description:      aaData.Description,
+			DescriptionWords: alphaNumericDistinctLowercaseWords(aaData.Title + " " + aaData.Description),
+		})
 	}
 
 	return subtitles, nil
 }
 
 // GetSubtitle retrieves the subtitles archive for the specified ID, extracts it and returns the content of the first SRT file on it
-func (s *subdivx) GetSubtitle(ctx context.Context, ID string) (*Subtitle, error) {
+func (s *subdivx) GetSubtitle(ctx context.Context, ID string) (*SubtitleContents, error) {
 
 	ctx, span := trace.SpanFromContext(ctx).TracerProvider().Tracer("").Start(ctx, "subdivx.Subdivx.GetSubtitle")
 	defer span.End()
@@ -246,10 +259,10 @@ func (s *subdivx) GetSubtitle(ctx context.Context, ID string) (*Subtitle, error)
 		return strings.HasSuffix(lcFilename, ".srt")
 	}
 
-	var sub *Subtitle
+	var sub *SubtitleContents
 	switch {
 	case isZip:
-		sub, err = func() (*Subtitle, error) {
+		sub, err = func() (*SubtitleContents, error) {
 			zr, err := zip.NewReader(bytes.NewReader(subCompressedFileContents), int64(len(subCompressedFileContents)))
 			if err != nil {
 				return nil, fmt.Errorf("invalid ZIP: %w", err)
@@ -277,13 +290,13 @@ func (s *subdivx) GetSubtitle(ctx context.Context, ID string) (*Subtitle, error)
 				return nil, fmt.Errorf("failed read SRT in ZIP: %w", err)
 			}
 
-			return &Subtitle{
+			return &SubtitleContents{
 				Name: srtFile.Name,
 				Data: data,
 			}, nil
 		}()
 	case isRar:
-		sub, err = func() (*Subtitle, error) {
+		sub, err = func() (*SubtitleContents, error) {
 			rr, err := rardecode.NewReader(bytes.NewReader(subCompressedFileContents), "")
 			if err != nil {
 				return nil, fmt.Errorf("invalid RAR: %w", err)
@@ -304,7 +317,7 @@ func (s *subdivx) GetSubtitle(ctx context.Context, ID string) (*Subtitle, error)
 						return nil, fmt.Errorf("failed read SRT in RAR: %w", err)
 					}
 
-					return &Subtitle{
+					return &SubtitleContents{
 						Name: header.Name,
 						Data: data,
 					}, nil

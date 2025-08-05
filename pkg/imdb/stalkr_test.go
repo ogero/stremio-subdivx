@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/StalkR/imdb"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestStalkrIMDB_GetTitle(t *testing.T) {
@@ -25,14 +27,8 @@ func TestStalkrIMDB_GetTitle(t *testing.T) {
 	}
 
 	title, err := s.GetTitle(context.Background(), "tt12345")
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
+	require.NoError(t, err)
 
-	if title.Name != "mockTitle" {
-		t.Errorf("expected name 'mockTitle', got %v", title.Name)
-	}
-	if title.Year != 2025 {
-		t.Errorf("expected year 2025, got %v", title.Year)
-	}
+	assert.Equal(t, "mockTitle", title.Name)
+	assert.Equal(t, 2025, title.Year)
 }

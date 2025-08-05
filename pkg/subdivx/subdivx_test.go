@@ -11,6 +11,9 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetToken(t *testing.T) {
@@ -22,7 +25,6 @@ func TestGetToken(t *testing.T) {
 		} else {
 			t.Fatalf("unexpected request %v", r)
 		}
-
 	}))
 	defer server.Close()
 
@@ -33,16 +35,11 @@ func TestGetToken(t *testing.T) {
 	}
 
 	token, err := s.GetToken(context.Background())
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
+	require.NoError(t, err)
 
-	if token.Token != "mockToken" {
-		t.Errorf("expected token 'mockToken', got %v", token.Token)
-	}
-	if token.Cookie.Name != "mockCookie" || token.Cookie.Value != "mockValue" {
-		t.Errorf("expected cookie 'mockCookie=mockValue', got %v", token.Cookie)
-	}
+	assert.Equal(t, "mockToken", token.Token)
+	assert.Equal(t, "mockCookie", token.Cookie.Name)
+	assert.Equal(t, "mockValue", token.Cookie.Value)
 }
 
 func TestGetSubtitles(t *testing.T) {
@@ -83,8 +80,8 @@ func TestGetSubtitles(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"iTotalRecords": 1,
-				"aaData": []map[string]int{
-					{"id": 123},
+				"aaData": []map[string]any{
+					{"id": 123, "titulo": "My mock movie", "descripcion": "A mock movie description!"},
 				},
 			})
 		} else {
@@ -105,15 +102,12 @@ func TestGetSubtitles(t *testing.T) {
 	}
 
 	subtitles, err := s.GetSubtitles(context.Background(), token, "testTitle")
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
+	require.NoError(t, err)
 
-	if subtitles.TotalRecords != 1 {
-		t.Errorf("expected 1 total record, got %v", subtitles.TotalRecords)
-	}
-	if len(subtitles.IDs) != 1 || subtitles.IDs[0] != 123 {
-		t.Errorf("expected IDs [123], got %v", subtitles.IDs)
+	if assert.Len(t, subtitles.Subtitles, 1) {
+		assert.EqualValues(t, 123, subtitles.Subtitles[0].ID)
+		assert.Equal(t, "My mock movie", subtitles.Subtitles[0].Title)
+		assert.ElementsMatch(t, strings.Fields("my a mock movie description"), subtitles.Subtitles[0].DescriptionWords)
 	}
 }
 
@@ -136,17 +130,10 @@ func TestGetSubtitle(t *testing.T) {
 	}
 
 	subtitle, err := s.GetSubtitle(context.Background(), "123")
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+	require.NoError(t, err)
+
+	if assert.Equal(t, "subtitle.srt", subtitle.Name) {
+		assert.Equal(t, "Mock subtitle content", string(subtitle.Data))
 	}
 
-	expectedName := "subtitle.srt"
-	if subtitle.Name != expectedName {
-		t.Errorf("expected subtitle name %v, got %v", expectedName, subtitle.Name)
-	}
-
-	expectedContent := "Mock subtitle content"
-	if !strings.Contains(string(subtitle.Data), expectedContent) {
-		t.Errorf("expected subtitle content to contain %q, got %q", expectedContent, string(subtitle.Data))
-	}
 }

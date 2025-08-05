@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -45,8 +46,8 @@ type Stats struct {
 type StremioService interface {
 	// Handler handles incoming HTTP requests via a websocket handler
 	http.Handler
-	// GetSubtitles retrieves subtitles for a given IMDb ID, season, and episode.
-	GetSubtitles(ctx context.Context, imdbID string, season int, episode int) (*Subtitles, error)
+	// GetSubtitles retrieves subtitles for a given title type, IMDb ID, season, and episode; filename is used to sort results by relevance.
+	GetSubtitles(ctx context.Context, titleType string, imdbID string, season int, episode int, filename string) (*Subtitles, error)
 	// GetSubtitle retrieves a specific subtitle by its Subdivx ID.
 	GetSubtitle(ctx context.Context, subdivxID string) ([]byte, error)
 	// BroadcastStats updates and publishes statistical data to a websocket channel.
@@ -126,9 +127,9 @@ func NewStremioService(statsWebsocketChannel string, imdb imdb.IMDB, subdivx sub
 	return svc
 }
 
-// GetSubtitles retrieves subtitles for a given IMDb ID, season, and episode.
+// GetSubtitles retrieves subtitles for a given title type, IMDb ID, season, and episode; filename is used to sort results by relevance
 // It uses caching to improve performance and reduce API calls.
-func (s *stremioService) GetSubtitles(ctx context.Context, imdbID string, season int, episode int) (*Subtitles, error) {
+func (s *stremioService) GetSubtitles(ctx context.Context, titleType string, imdbID string, season int, episode int, filename string) (*Subtitles, error) {
 
 	ctx, span := trace.SpanFromContext(ctx).TracerProvider().Tracer("").Start(ctx, "internal.StremioService.GetSubtitles")
 	defer span.End()
@@ -170,13 +171,15 @@ func (s *stremioService) GetSubtitles(ctx context.Context, imdbID string, season
 		}
 	}()
 
-	subdivxSearchTerm := imdbTitle.Name
-	if season != 0 && episode != 0 {
+	var subdivxSearchTerm string
+	if titleType == "movie" {
+		subdivxSearchTerm = fmt.Sprintf("%s (%d)", imdbTitle.Name, imdbTitle.Year)
+	} else {
 		subdivxSearchTerm = fmt.Sprintf("%s S%02dE%02d", imdbTitle.Name, season, episode)
 	}
 
 	cacheResult = "hit"
-	cacheKey = fmt.Sprintf("subdivx.subtitles : %s", subdivxSearchTerm)
+	cacheKey = fmt.Sprintf("subdivx.subtitles.v1 : %s", subdivxSearchTerm)
 	cacheTTL = 24 * time.Hour
 	subdivxSubtitles, err := cache.Memoize[subdivx.Subtitles](cacheKey, cacheTTL, func() (*subdivx.Subtitles, error) {
 
@@ -201,17 +204,38 @@ func (s *stremioService) GetSubtitles(ctx context.Context, imdbID string, season
 	if err != nil {
 		return nil, err
 	}
-	common.Log.InfoContext(ctx, "Found subtitles", "ids", subdivxSubtitles.IDs)
 	span.SetAttributes(attribute.Int("subdivx.total-records", subdivxSubtitles.TotalRecords))
-	span.SetAttributes(attribute.Int("subdivx.ids-count", len(subdivxSubtitles.IDs)))
+	span.SetAttributes(attribute.Int("subdivx.ids-count", len(subdivxSubtitles.Subtitles)))
 
-	ids := make([]string, 0, len(subdivxSubtitles.IDs))
-	for _, subdivxSubtitleID := range subdivxSubtitles.IDs {
-		ids = append(ids, strconv.Itoa(subdivxSubtitleID))
+	type ScoredSubtitle struct {
+		ID    int
+		Score int
 	}
 
+	subdivxScoredSubtitles := make([]ScoredSubtitle, 0, len(subdivxSubtitles.Subtitles))
+	for _, subdivxSubtitle := range subdivxSubtitles.Subtitles {
+		subdivxScoredSubtitle := ScoredSubtitle{
+			ID:    subdivxSubtitle.ID,
+			Score: subdivxSubtitle.Score(filename),
+		}
+		subdivxScoredSubtitles = append(subdivxScoredSubtitles, subdivxScoredSubtitle)
+	}
+	sort.Slice(subdivxScoredSubtitles, func(i, j int) bool {
+		return subdivxScoredSubtitles[i].Score > subdivxScoredSubtitles[j].Score
+	})
+
+	ids := make([]int, len(subdivxScoredSubtitles))
+	scores := make([]int, len(subdivxScoredSubtitles))
+	idsString := make([]string, len(subdivxScoredSubtitles))
+	for i, item := range subdivxScoredSubtitles {
+		ids[i] = item.ID
+		scores[i] = item.Score
+		idsString[i] = strconv.Itoa(item.ID)
+	}
+	common.Log.InfoContext(ctx, "Found subtitles", "title", subdivxSearchTerm, "ids", ids, "scores", scores)
+
 	return &Subtitles{
-		IDs:  ids,
+		IDs:  idsString,
 		Lang: "spa",
 		Year: imdbTitle.Year,
 	}, nil

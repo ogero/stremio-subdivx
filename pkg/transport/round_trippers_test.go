@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/ogero/stremio-subdivx/pkg/transport"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type mockRoundTripper struct {
@@ -18,13 +20,8 @@ func (m *mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 func TestModifyHeadersRoundTripper(t *testing.T) {
 	mockRT := &mockRoundTripper{
 		RoundTripFunc: func(req *http.Request) (*http.Response, error) {
-			if got := req.Header.Get("User-Agent"); got != "TestAgent" {
-				t.Errorf("User-Agent = %q, want %q", got, "TestAgent")
-			}
-
-			if got := req.Header.Get("Accept-Language"); got != "en-US" {
-				t.Errorf("Accept-Language = %q, want %q", got, "en-US")
-			}
+			assert.Equal(t, "TestAgent", req.Header.Get("User-Agent"))
+			assert.Equal(t, "en-US", req.Header.Get("Accept-Language"))
 			return nil, nil
 		},
 	}
@@ -34,9 +31,7 @@ func TestModifyHeadersRoundTripper(t *testing.T) {
 		transport.WithAcceptLanguage("en-US"))
 
 	req, err := http.NewRequest(http.MethodGet, "http://example.com", nil)
-	if err != nil {
-		t.Fatalf("NewRequest failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	_, _ = rt.RoundTrip(req)
 }

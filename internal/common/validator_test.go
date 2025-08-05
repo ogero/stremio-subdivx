@@ -4,30 +4,29 @@ import (
 	"testing"
 
 	"github.com/ogero/stremio-subdivx/internal/common"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestValidateIMDBTitleID(t *testing.T) {
 	tests := []struct {
 		title   string
-		wantErr bool
+		wantErr assert.ErrorAssertionFunc
 	}{
-		{"tt1234567", false},
-		{"tt0012345", false},
-		{"tt0", false},
-		{"tt", true},
-		{"tt-1", true},
-		{"tt-1", true},
-		{"1234567", true},
-		{"ttabcdefg", true},
-		{"", true},
+		{"tt1234567", assert.NoError},
+		{"tt0012345", assert.NoError},
+		{"tt0", assert.NoError},
+		{"tt", assert.Error},
+		{"tt-1", assert.Error},
+		{"tt-1", assert.Error},
+		{"1234567", assert.Error},
+		{"ttabcdefg", assert.Error},
+		{"", assert.Error},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.title, func(t *testing.T) {
 			err := common.ValidateIMDBTitleID(tt.title)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateIMDBTitleID() error = %v, wantErr %v", err, tt.wantErr)
-			}
+			tt.wantErr(t, err)
 		})
 	}
 }
@@ -35,20 +34,18 @@ func TestValidateIMDBTitleID(t *testing.T) {
 func TestValidateSubtitleType(t *testing.T) {
 	tests := []struct {
 		t       string
-		wantErr bool
+		wantErr assert.ErrorAssertionFunc
 	}{
-		{"movie", false},
-		{"series", false},
-		{"documentary", true},
-		{"", true},
+		{"movie", assert.NoError},
+		{"series", assert.NoError},
+		{"documentary", assert.Error},
+		{"", assert.Error},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.t, func(t *testing.T) {
 			err := common.ValidateSubtitleType(tt.t)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateSubtitleType() error = %v, wantErr %v", err, tt.wantErr)
-			}
+			tt.wantErr(t, err)
 		})
 	}
 }
@@ -56,21 +53,19 @@ func TestValidateSubtitleType(t *testing.T) {
 func TestValidateSubdivxSubtitleID(t *testing.T) {
 	tests := []struct {
 		id      string
-		wantErr bool
+		wantErr assert.ErrorAssertionFunc
 	}{
-		{"123456", false},
-		{"0", true},
-		{"-123456", true},
-		{"abc123", true},
-		{"", true},
+		{"123456", assert.NoError},
+		{"0", assert.Error},
+		{"-123456", assert.Error},
+		{"abc123", assert.Error},
+		{"", assert.Error},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.id, func(t *testing.T) {
 			err := common.ValidateSubdivxSubtitleID(tt.id)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateSubdivxSubtitleID() error = %v, wantErr %v", err, tt.wantErr)
-			}
+			tt.wantErr(t, err)
 		})
 	}
 }

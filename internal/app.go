@@ -131,7 +131,21 @@ func (a *App) SubtitlesHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	subtitles, err := a.StremioService.GetSubtitles(ctx, imdbID, seasonNumber, episodeNumber)
+	paramsWildcard := chi.URLParam(r, "*")
+	var queryFilename string
+	if queryValues, err := url.ParseQuery(paramsWildcard); err != nil {
+		common.Log.WarnContext(ctx, "Failed to url.ParseQuery", "err", err)
+		span.RecordError(err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	} else if queryFilename = queryValues.Get("filename"); queryFilename == "" {
+		common.Log.WarnContext(ctx, "Failed to url.Values.Get(filename)", "err", fmt.Errorf("filename not found"))
+		span.RecordError(err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	subtitles, err := a.StremioService.GetSubtitles(ctx, paramsType, imdbID, seasonNumber, episodeNumber, queryFilename)
 	if err != nil {
 		common.Log.ErrorContext(ctx, "Failed to StremioService.GetSubtitles", "err", err)
 		span.RecordError(err)
