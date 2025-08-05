@@ -22,21 +22,11 @@ import (
 	"golang.org/x/text/transform"
 )
 
-var manifest = stremio.Manifest{
-	ID:          "ar.xor.subdivx.go",
-	Version:     "0.0.4",
-	Name:        "Subdivx",
-	Description: "Subdivx subtitles addon",
-	Types:       []string{"movie", "series"},
-	Catalogs:    []stremio.CatalogItem{},
-	IDPrefixes:  []string{"tt"},
-	Resources:   []string{"subtitles"},
-}
-
 // App represents the main application structure that holds the Stremio service and addon host information.
 type App struct {
-	StremioService StremioService
-	AddonHost      string
+	StremioService  StremioService
+	StremioManifest *stremio.Manifest
+	AddonHost       string
 }
 
 /*
@@ -44,15 +34,17 @@ NewApp creates a new instance of the App struct.
 
 Parameters:
   - stremioService: The service used to interact with Stremio.
+  - stremioManifest: The manifest used to interact with Stremio.
   - addonHost: The host address for the addon.
 
 Returns:
   - A pointer to the newly created App instance.
 */
-func NewApp(stremioService StremioService, addonHost string) (*App, error) {
+func NewApp(stremioService StremioService, stremioManifest *stremio.Manifest, addonHost string) (*App, error) {
 	return &App{
-		StremioService: stremioService,
-		AddonHost:      addonHost,
+		StremioService:  stremioService,
+		StremioManifest: stremioManifest,
+		AddonHost:       addonHost,
 	}, nil
 }
 
@@ -69,7 +61,7 @@ func (a *App) ManifestHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 
-	b, _ := json.Marshal(manifest)
+	b, _ := json.Marshal(a.StremioManifest)
 	_, err := w.Write(b)
 	if err != nil {
 		common.Log.ErrorContext(ctx, "Failed to write response", "err", err)

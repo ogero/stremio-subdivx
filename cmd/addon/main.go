@@ -24,6 +24,7 @@ import (
 	"github.com/ogero/stremio-subdivx/internal/common"
 	"github.com/ogero/stremio-subdivx/internal/loki"
 	"github.com/ogero/stremio-subdivx/pkg/imdb"
+	"github.com/ogero/stremio-subdivx/pkg/stremio"
 	"github.com/ogero/stremio-subdivx/pkg/subdivx"
 	slogchi "github.com/samber/slog-chi"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -34,7 +35,7 @@ type config struct {
 	ServerListenAddr     string `env:"SERVER_LISTEN_ADDR" envDefault:":3593"`
 	ServiceName          string `env:"SERVICE_NAME" envDefault:"stremio-subdivx"`
 	ServiceEnvironment   string `env:"SERVICE_ENVIRONMENT" envDefault:"lcl"`
-	ServiceVersion       string `env:"SERVICE_VERSION" envDefault:"v0.0.4"`
+	ServiceVersion       string `env:"SERVICE_VERSION" envDefault:"v0.0.5"`
 	OtelExporterEndpoint string `env:"OTEL_EXPORTER_ENDPOINT" envDefault:"127.0.0.1:4317"`
 	LokiHost             string `env:"LOKI_HOST" envDefault:"http://127.0.0.1:3100"`
 	StatsWSChannel       string `env:"STATS_WS_CHANNEL" envDefault:"stremio-subdivx:stats"`
@@ -53,6 +54,17 @@ func main() {
 	loggerShutdown, err := common.InitLogger(cfg.ServiceName, cfg.ServiceVersion, cfg.ServiceEnvironment, cfg.OtelExporterEndpoint)
 	if err != nil {
 		panic(fmt.Errorf("failed to logger.InitLogger: %w", err))
+	}
+
+	stremioManifest := &stremio.Manifest{
+		ID:          "ar.xor.subdivx.go",
+		Version:     cfg.ServiceVersion,
+		Name:        "Subdivx",
+		Description: "Subdivx subtitles addon",
+		Types:       []string{"movie", "series"},
+		Catalogs:    []stremio.CatalogItem{},
+		IDPrefixes:  []string{"tt"},
+		Resources:   []string{"subtitles"},
 	}
 
 	err = cache.InitCache(slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -76,7 +88,7 @@ func main() {
 
 	go stremioService.StartPollingStats(1 * time.Minute)
 
-	app, err := internal.NewApp(stremioService, cfg.AddonHost)
+	app, err := internal.NewApp(stremioService, stremioManifest, cfg.AddonHost)
 	if err != nil {
 		common.Log.Error("Failed to internal.NewApp", "err", err)
 		os.Exit(1)
