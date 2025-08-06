@@ -58,7 +58,7 @@ func main() {
 
 	stremioManifest := &stremio.Manifest{
 		ID:          "ar.xor.subdivx.go",
-		Version:     cfg.ServiceVersion,
+		Version:     strings.TrimLeft(cfg.ServiceVersion, "v"),
 		Name:        "Subdivx",
 		Description: "Subdivx subtitles addon",
 		Types:       []string{"movie", "series"},
