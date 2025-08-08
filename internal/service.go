@@ -1,9 +1,11 @@
 package internal
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"sort"
@@ -17,9 +19,14 @@ import (
 	"github.com/ogero/stremio-subdivx/internal/loki"
 	"github.com/ogero/stremio-subdivx/pkg/imdb"
 	"github.com/ogero/stremio-subdivx/pkg/subdivx"
+	"github.com/wlynxg/chardet"
+	"github.com/wlynxg/chardet/consts"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/text/encoding"
+	"golang.org/x/text/encoding/charmap"
+	"golang.org/x/text/transform"
 )
 
 // Subtitles struct holds information about subtitles, including their IDs, language, and the year of the content they are associated with.
@@ -252,7 +259,26 @@ func (s *stremioService) GetSubtitle(ctx context.Context, subdivxID string) ([]b
 	if err != nil {
 		return nil, fmt.Errorf("failed to subdivx.Subdivx.GetSubtitle: %w", err)
 	}
-	common.Log.WithGroup("file").InfoContext(ctx, "Got SRT", "name", subtitle.Name, "size", len(subtitle.Data))
+
+	fileEncoding := chardet.Detect(subtitle.Data).Encoding
+	common.Log.WithGroup("file").InfoContext(ctx, "Got SRT", "name", subtitle.Name, "encoding", fileEncoding, "size", len(subtitle.Data))
+
+	var decoder *encoding.Decoder
+	switch fileEncoding {
+	case consts.Windows1252:
+		decoder = charmap.Windows1252.NewDecoder()
+	case consts.ISO88591:
+		decoder = charmap.ISO8859_1.NewDecoder()
+	}
+
+	if decoder != nil {
+		tr := transform.NewReader(bytes.NewReader(subtitle.Data), charmap.Windows1252.NewDecoder())
+		data, err := io.ReadAll(tr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to io.ReadAll when transforming subtitle encoding: %w", err)
+		}
+		return data, nil
+	}
 
 	return subtitle.Data, nil
 }

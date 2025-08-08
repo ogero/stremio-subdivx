@@ -1,10 +1,8 @@
 package internal
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -14,12 +12,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/ogero/stremio-subdivx/internal/common"
 	"github.com/ogero/stremio-subdivx/pkg/stremio"
-	"github.com/wlynxg/chardet"
-	"github.com/wlynxg/chardet/consts"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
-	"golang.org/x/text/encoding/charmap"
-	"golang.org/x/text/transform"
 )
 
 // App represents the main application structure that holds the Stremio service and addon host information.
@@ -202,20 +196,12 @@ func (a *App) SubdivxSubtitleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", fmt.Sprintf("text/plain; charset=%s", consts.UTF8))
+	w.Header().Set("Content-Type", "application/force-download")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s.srt\"", paramsID))
 	w.Header().Set("CDN-Cache-Control", "public, max-age=1296000")
 	w.Header().Set("Cache-Control", "public, max-age=1296000")
 
-	switch chardet.Detect(data).Encoding {
-	case consts.UTF8:
-		_, err = w.Write(data)
-	case consts.ISO88591:
-		tr := transform.NewReader(bytes.NewReader(data), charmap.ISO8859_1.NewDecoder())
-		_, err = io.Copy(w, tr)
-	default:
-		_, err = w.Write(data)
-	}
-
+	_, err = w.Write(data)
 	if err != nil {
 		common.Log.ErrorContext(ctx, "Failed to write response", "err", err)
 		span.RecordError(err)
