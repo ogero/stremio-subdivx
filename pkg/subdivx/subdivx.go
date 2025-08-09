@@ -3,6 +3,7 @@ package subdivx
 import (
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -246,13 +247,15 @@ func (s *subdivx) GetSubtitle(ctx context.Context, ID string) (*SubtitleContents
 		return nil, fmt.Errorf("archive file too short")
 	}
 
-	// Check if it's ZIP or RAR by magic bytes
+	// Check if it's ZIP, RAR or GZIP by magic bytes
 	// standard ZIP signature
 	isZip := bytes.HasPrefix(subCompressedFileContents, []byte("PK\x03\x04"))
 	// RAR 1.5-4.0
 	isRar := bytes.HasPrefix(subCompressedFileContents, []byte("Rar!\x1A\x07\x00")) ||
 		// RAR 5.0
 		bytes.HasPrefix(subCompressedFileContents, []byte("Rar!\x1A\x07\x01\x00"))
+	// GZIP signature
+	isGZip := bytes.HasPrefix(subCompressedFileContents, []byte("\x1F\x8B"))
 
 	isSubtitle := func(filename string) bool {
 		lcFilename := strings.ToLower(filename)
@@ -325,8 +328,26 @@ func (s *subdivx) GetSubtitle(ctx context.Context, ID string) (*SubtitleContents
 			}
 			return nil, fmt.Errorf("no SRT file found in ZIP")
 		}()
+	case isGZip:
+		sub, err = func() (*SubtitleContents, error) {
+			gzr, err := gzip.NewReader(bytes.NewReader(subCompressedFileContents))
+			if err != nil {
+				return nil, fmt.Errorf("invalid GZIP: %w", err)
+			}
+			defer gzr.Close()
+
+			data, err := io.ReadAll(gzr)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read GZIP: %w", err)
+			}
+
+			return &SubtitleContents{
+				Name: gzr.Name,
+				Data: data,
+			}, nil
+		}()
 	default:
-		return nil, fmt.Errorf("unknown archive format (not ZIP or RAR)")
+		return nil, fmt.Errorf("unknown archive format")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to process subtitle archive: %w", err)
