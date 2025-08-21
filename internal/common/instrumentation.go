@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	metric2 "go.opentelemetry.io/otel/metric"
@@ -52,7 +53,7 @@ func InitInstrumentation(serviceName, serviceVersion, serviceEnvironment, export
 	// Register metric provider
 	otel.SetMeterProvider(metricsProvider)
 
-	err = createCustomMeters(serviceName)
+	err = createCustomMeters(serviceName, serviceVersion, serviceEnvironment)
 	if err != nil {
 		_ = metricsProvider.Shutdown(context.Background())
 		_ = metricExporter.Shutdown(context.Background())
@@ -94,15 +95,23 @@ func InitInstrumentation(serviceName, serviceVersion, serviceEnvironment, export
 	}, nil
 }
 
-// CacheGetsTotal represents a metric for tracking cache hits and misses
-var CacheGetsTotal metric2.Int64Counter
+// CacheGetsTotalIncr increases in 1 a metric for tracking cache hits and misses
+var CacheGetsTotalIncr func(ctx context.Context, keyPrefix, result string)
 
-func createCustomMeters(serviceName string) error {
+func createCustomMeters(serviceName, serviceVersion, serviceEnvironment string) error {
 	meter := otel.Meter(serviceName)
 	var err error
-	CacheGetsTotal, err = meter.Int64Counter("cache_gets_total")
+	cacheGetsTotal, err := meter.Int64Counter("cache_gets_total")
 	if err != nil {
 		return fmt.Errorf("failed to create custom meter: %w", err)
+	}
+	CacheGetsTotalIncr = func(ctx context.Context, keyPrefix, result string) {
+		cacheGetsTotal.Add(ctx, 1, metric2.WithAttributes(
+			attribute.String(string(semconv.DeploymentEnvironmentNameKey), serviceEnvironment),
+			attribute.String(string(semconv.ServiceVersionKey), serviceVersion),
+			attribute.String("key.prefix", keyPrefix),
+			attribute.String("result", result),
+		))
 	}
 
 	return nil

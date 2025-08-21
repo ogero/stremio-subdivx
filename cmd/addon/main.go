@@ -35,7 +35,7 @@ type config struct {
 	ServerListenAddr     string `env:"SERVER_LISTEN_ADDR" envDefault:":3593"`
 	ServiceName          string `env:"SERVICE_NAME" envDefault:"stremio-subdivx"`
 	ServiceEnvironment   string `env:"SERVICE_ENVIRONMENT" envDefault:"lcl"`
-	ServiceVersion       string `env:"SERVICE_VERSION" envDefault:"v0.0.6"`
+	ServiceVersion       string `env:"SERVICE_VERSION" envDefault:"v0.0.7"`
 	OtelExporterEndpoint string `env:"OTEL_EXPORTER_ENDPOINT" envDefault:"127.0.0.1:4317"`
 	LokiHost             string `env:"LOKI_HOST" envDefault:"http://127.0.0.1:3100"`
 	StatsWSChannel       string `env:"STATS_WS_CHANNEL" envDefault:"stremio-subdivx:stats"`

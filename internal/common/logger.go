@@ -46,7 +46,7 @@ func InitLogger(serviceName, serviceVersion, serviceEnvironment, exporterEndpoin
 	slogHandler = otelslog.NewHandler("github.com/ogero/stremio-subdivx",
 		otelslog.WithLoggerProvider(lp))
 
-	if serviceEnvironment == "lcl" {
+	if serviceEnvironment == "lcl" || serviceEnvironment == "dk" {
 		slogHandler = slogmulti.Fanout(
 			slogHandler,
 			slog.NewTextHandler(os.Stdout, nil),

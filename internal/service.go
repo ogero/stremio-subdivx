@@ -22,7 +22,6 @@ import (
 	"github.com/wlynxg/chardet"
 	"github.com/wlynxg/chardet/consts"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/charmap"
@@ -155,10 +154,7 @@ func (s *stremioService) GetSubtitles(ctx context.Context, titleType string, imd
 		return title, nil
 	})
 	span.SetAttributes(attribute.String("cache.imdb.title.result", cacheResult))
-	common.CacheGetsTotal.Add(ctx, 1, metric.WithAttributes(
-		attribute.String("key.prefix", "imdb.title"),
-		attribute.String("result", cacheResult),
-	))
+	common.CacheGetsTotalIncr(ctx, "imdb.title", cacheResult)
 	if err != nil {
 		return nil, err
 	}
@@ -204,10 +200,7 @@ func (s *stremioService) GetSubtitles(ctx context.Context, titleType string, imd
 		return subtitles, nil
 	})
 	span.SetAttributes(attribute.String("cache.subdivx.subtitles.result", cacheResult))
-	common.CacheGetsTotal.Add(ctx, 1, metric.WithAttributes(
-		attribute.String("key.prefix", "subdivx.subtitles"),
-		attribute.String("result", cacheResult),
-	))
+	common.CacheGetsTotalIncr(ctx, "subdivx.subtitles", cacheResult)
 	if err != nil {
 		return nil, err
 	}

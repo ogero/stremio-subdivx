@@ -7,6 +7,7 @@ services:
     environment:
       - SERVICE_ENVIRONMENT=dk
       - OTEL_EXPORTER_ENDPOINT=otel-collector:4317
+      - LOKI_HOST=http://loki:3100
     ports:
       - "3593:3593" # stremio-subdivx
     volumes:
@@ -28,7 +29,7 @@ services:
     container_name: prometheus
     user: root
     restart: unless-stopped
-    entrypoint: "prometheus --config.file=/static_configs/prometheus.yaml --storage.tsdb.path=/prometheus/data --web.enable-remote-write-receiver"
+    entrypoint: "prometheus --config.file=/static_configs/prometheus.yaml --storage.tsdb.path=/prometheus/data --web.enable-remote-write-receiver --web.enable-admin-api"
     ports:
       - "9090:9090" # prometheus
     volumes:
