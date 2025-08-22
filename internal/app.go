@@ -126,9 +126,6 @@ func (a *App) SubtitlesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if queryFilename = queryValues.Get("filename"); queryFilename == "" {
 		common.Log.WarnContext(ctx, "Failed to url.Values.Get(filename)", "err", fmt.Errorf("filename not found"))
-		span.RecordError(err)
-		w.WriteHeader(http.StatusBadRequest)
-		return
 	}
 
 	subtitles, err := a.StremioService.GetSubtitles(ctx, paramsType, imdbID, seasonNumber, episodeNumber, queryFilename)
