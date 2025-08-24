@@ -28,6 +28,7 @@ const Footer = ({t}: FooterProps) => {
             <ul className="space-y-2">
               <li><LanguagePicker/></li>
               <li><a href={'https://www.stremio.com/'} rel={'noopener'} target={'_blank'} className="text-gray-400 hover:text-white transition-colors">Stremio.com</a></li>
+              <li><a href={'https://github.com/ogero/stremio-subdivx'} target={'_blank'} className="text-gray-400 hover:text-white transition-colors">Github</a></li>
               <li><a href={'https://cafecito.app/ogero'} rel={'noopener'} target={'_blank'} className="text-gray-400 hover:text-white transition-colors">{t('Donate')}</a></li>
             </ul>
           </div>
