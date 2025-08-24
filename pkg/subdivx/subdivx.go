@@ -1,9 +1,7 @@
 package subdivx
 
 import (
-	"archive/zip"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nwaples/rardecode"
+	"github.com/gen2brain/go-unarr"
 	"github.com/ogero/stremio-subdivx/pkg/transport"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -215,142 +213,59 @@ func (s *subdivx) GetSubtitle(ctx context.Context, ID string) (*SubtitleContents
 	ctx, span := trace.SpanFromContext(ctx).TracerProvider().Tracer("").Start(ctx, "subdivx.Subdivx.GetSubtitle")
 	defer span.End()
 
-	subCompressedFileContents, err := func() ([]byte, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.baseURL+"/descargar.php?id="+ID, nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to http.NewRequestWithContext: %w", err)
-		}
-
-		res, err := s.httpClient.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("failed to http.Client.Do: %w", err)
-		}
-		defer res.Body.Close()
-
-		if res.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("invalid status code: %d", res.StatusCode)
-		}
-
-		buf := new(bytes.Buffer)
-		lr := io.LimitReader(res.Body, 200*1024)
-		if _, err := io.Copy(buf, lr); err != nil {
-			return nil, fmt.Errorf("failed to io.Copy with io.LimitReader: %w", err)
-		}
-
-		return buf.Bytes(), nil
-	}()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.baseURL+"/descargar.php?id="+ID, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to download subtitle archive: %w", err)
+		return nil, fmt.Errorf("failed to http.NewRequestWithContext: %w", err)
 	}
 
-	if len(subCompressedFileContents) < 4 {
-		return nil, fmt.Errorf("archive file too short")
+	res, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to http.Client.Do: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("invalid status code: %d", res.StatusCode)
 	}
 
-	// Check if it's ZIP, RAR or GZIP by magic bytes
-	// standard ZIP signature
-	isZip := bytes.HasPrefix(subCompressedFileContents, []byte("PK\x03\x04"))
-	// RAR 1.5-4.0
-	isRar := bytes.HasPrefix(subCompressedFileContents, []byte("Rar!\x1A\x07\x00")) ||
-		// RAR 5.0
-		bytes.HasPrefix(subCompressedFileContents, []byte("Rar!\x1A\x07\x01\x00"))
-	// GZIP signature
-	isGZip := bytes.HasPrefix(subCompressedFileContents, []byte("\x1F\x8B"))
+	lr := io.LimitReader(res.Body, 200*1024)
 
 	isSubtitle := func(filename string) bool {
 		lcFilename := strings.ToLower(filename)
 		return strings.HasSuffix(lcFilename, ".srt")
 	}
 
-	var sub *SubtitleContents
-	switch {
-	case isZip:
-		sub, err = func() (*SubtitleContents, error) {
-			zr, err := zip.NewReader(bytes.NewReader(subCompressedFileContents), int64(len(subCompressedFileContents)))
-			if err != nil {
-				return nil, fmt.Errorf("invalid ZIP: %w", err)
-			}
-
-			var srtFile *zip.File
-			for _, file := range zr.File {
-				if isSubtitle(file.Name) {
-					srtFile = file
-					break
-				}
-			}
-			if srtFile == nil {
-				return nil, fmt.Errorf("no SRT file found in ZIP")
-			}
-
-			rc, err := srtFile.Open()
-			if err != nil {
-				return nil, fmt.Errorf("failed to open SRT in ZIP: %w", err)
-			}
-			defer rc.Close()
-
-			data, err := io.ReadAll(rc)
-			if err != nil {
-				return nil, fmt.Errorf("failed read SRT in ZIP: %w", err)
-			}
-
-			return &SubtitleContents{
-				Name: srtFile.Name,
-				Data: data,
-			}, nil
-		}()
-	case isRar:
-		sub, err = func() (*SubtitleContents, error) {
-			rr, err := rardecode.NewReader(bytes.NewReader(subCompressedFileContents), "")
-			if err != nil {
-				return nil, fmt.Errorf("invalid RAR: %w", err)
-			}
-
-			for {
-				header, err := rr.Next()
-				if err == io.EOF {
-					break
-				}
-				if err != nil {
-					return nil, fmt.Errorf("failed to read RAR: %w", err)
-				}
-				if isSubtitle(header.Name) {
-
-					data, err := io.ReadAll(rr)
-					if err != nil {
-						return nil, fmt.Errorf("failed read SRT in RAR: %w", err)
-					}
-
-					return &SubtitleContents{
-						Name: header.Name,
-						Data: data,
-					}, nil
-				}
-			}
-			return nil, fmt.Errorf("no SRT file found in ZIP")
-		}()
-	case isGZip:
-		sub, err = func() (*SubtitleContents, error) {
-			gzr, err := gzip.NewReader(bytes.NewReader(subCompressedFileContents))
-			if err != nil {
-				return nil, fmt.Errorf("invalid GZIP: %w", err)
-			}
-			defer gzr.Close()
-
-			data, err := io.ReadAll(gzr)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read GZIP: %w", err)
-			}
-
-			return &SubtitleContents{
-				Name: gzr.Name,
-				Data: data,
-			}, nil
-		}()
-	default:
-		return nil, fmt.Errorf("unknown archive format")
-	}
+	ar, err := unarr.NewArchiveFromReader(lr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to process subtitle archive: %w", err)
+		return nil, fmt.Errorf("failed to unarr.NewArchiveFromReader: %w", err)
+	}
+	defer ar.Close()
+
+	var sub *SubtitleContents
+	for {
+		err = ar.Entry()
+		if err != nil {
+			if err == io.EOF {
+				break
+			} else {
+				return nil, fmt.Errorf("failed to unarr.Archive.Entry: %w", err)
+			}
+		}
+		fName := ar.Name()
+		if isSubtitle(ar.Name()) {
+			fData, err := ar.ReadAll()
+			if err != nil {
+				return nil, fmt.Errorf("failed to unarr.Archive.ReadAll: %w", err)
+			}
+			sub = &SubtitleContents{
+				Name: fName,
+				Data: fData,
+			}
+		}
+	}
+
+	if sub == nil {
+		return nil, fmt.Errorf("no SRT file found in ZIP")
 	}
 
 	return sub, nil

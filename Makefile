@@ -13,7 +13,7 @@ run:
 
 build:
 	mkdir -p frontend/dist && touch frontend/dist/index.html
-	@CGO_ENABLED=0 go build -o .bin/$(APP) cmd/addon/*
+	@go build -o .bin/$(APP) cmd/addon/*
 
 docker-build:
 	@docker build . --tag $(APP)

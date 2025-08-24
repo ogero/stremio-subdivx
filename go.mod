@@ -7,9 +7,9 @@ require (
 	github.com/caarlos0/env/v11 v11.3.1
 	github.com/centrifugal/centrifuge v0.37.0
 	github.com/dgraph-io/badger/v4 v4.8.0
+	github.com/gen2brain/go-unarr v0.2.4
 	github.com/go-chi/chi/v5 v5.2.2
 	github.com/go-chi/cors v1.2.2
-	github.com/nwaples/rardecode v1.1.3
 	github.com/samber/slog-chi v1.15.0
 	github.com/samber/slog-multi v1.4.1
 	github.com/stretchr/testify v1.10.0
@@ -40,7 +40,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/gammazero/deque v1.1.0 // indirect
-	github.com/gen2brain/go-unarr v0.2.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
