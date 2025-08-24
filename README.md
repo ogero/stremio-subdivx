@@ -2,7 +2,11 @@
 
 ## Description
 
-Addon for getting subtitles from Subdivx.
+Stremio addon for getting subtitles from Subdivx.
+
+### Website & Install
+
+https://stremio-subdivx.xor.ar/
 
 ## Configuration
 
@@ -17,22 +21,10 @@ The following environment variables can be used to configure the addon:
 make build
 ```
 
-or
-
-```bash
-CGO_ENABLED=0 go build -o .bin/stremio-subdivx cmd/addon/*
-```
-
 ## Run
 
 ```bash
 make run
-```
-
-or
-
-```bash
-go run cmd/addon/*
 ```
 
 ## Docker
@@ -41,12 +33,6 @@ go run cmd/addon/*
 
 ```bash
 make docker-build
-```
-
-or
-
-```bash
-docker build . --tag stremio-subdivx
 ```
 
 ### Run
