@@ -8,7 +8,7 @@ require (
 	github.com/centrifugal/centrifuge v0.37.0
 	github.com/dgraph-io/badger/v4 v4.8.0
 	github.com/gen2brain/go-unarr v0.2.4
-	github.com/go-chi/chi/v5 v5.2.2
+	github.com/go-chi/chi/v5 v5.2.3
 	github.com/go-chi/cors v1.2.2
 	github.com/samber/slog-chi v1.15.0
 	github.com/samber/slog-multi v1.4.1
