@@ -228,7 +228,7 @@ func (s *subdivx) GetSubtitle(ctx context.Context, ID string) (*SubtitleContents
 		return nil, fmt.Errorf("invalid status code: %d", res.StatusCode)
 	}
 
-	lr := io.LimitReader(res.Body, 500*1024)
+	lr := LimitReader(res.Body, 500*1024, ErrReadBeyondLimit)
 
 	isSubtitle := func(filename string) bool {
 		lcFilename := strings.ToLower(filename)
