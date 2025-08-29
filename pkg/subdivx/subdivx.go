@@ -260,7 +260,7 @@ func (s *subdivx) GetSubtitle(ctx context.Context, ID string) (*SubtitleContents
 	}
 
 	if sub == nil {
-		return nil, fmt.Errorf("no SRT file found in ZIP")
+		return nil, fmt.Errorf("no subtitle file found in archive")
 	}
 
 	return sub, nil
