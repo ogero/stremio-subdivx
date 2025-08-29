@@ -137,3 +137,27 @@ func TestGetSubtitle(t *testing.T) {
 	}
 
 }
+
+func TestIsSubtitle(t *testing.T) {
+	tests := []struct {
+		filename string
+		expected assert.BoolAssertionFunc
+	}{
+		{"movie.srt", assert.True},
+		{"movie.sub", assert.True},
+		{"movie.ssa", assert.True},
+		{"movie.txt", assert.False},
+		{"movie.srt.bak", assert.False},
+		{"movie.SRT", assert.True}, // Case insensitivity
+		{"e.srt", assert.True},
+		{"srt", assert.False},
+		{".srt", assert.False},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.filename, func(t *testing.T) {
+			result := isSubtitle(tt.filename)
+			tt.expected(t, result)
+		})
+	}
+}

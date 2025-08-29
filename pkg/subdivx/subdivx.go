@@ -230,11 +230,6 @@ func (s *subdivx) GetSubtitle(ctx context.Context, ID string) (*SubtitleContents
 
 	lr := LimitReader(res.Body, 500*1024, ErrReadBeyondLimit)
 
-	isSubtitle := func(filename string) bool {
-		lcFilename := strings.ToLower(filename)
-		return strings.HasSuffix(lcFilename, ".srt")
-	}
-
 	ar, err := unarr.NewArchiveFromReader(lr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unarr.NewArchiveFromReader: %w", err)
@@ -269,4 +264,16 @@ func (s *subdivx) GetSubtitle(ctx context.Context, ID string) (*SubtitleContents
 	}
 
 	return sub, nil
+}
+
+func isSubtitle(filename string) bool {
+	lcFilename := strings.ToLower(filename)
+	if len(lcFilename) > 4 {
+		ext := lcFilename[len(lcFilename)-4:]
+		switch ext {
+		case ".srt", ".sub", ".ssa":
+			return true
+		}
+	}
+	return false
 }
