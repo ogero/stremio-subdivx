@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -230,7 +231,16 @@ func (s *subdivx) GetSubtitle(ctx context.Context, ID string) (*SubtitleContents
 
 	lr := LimitReader(res.Body, 500*1024, ErrReadBeyondLimit)
 
-	ar, err := unarr.NewArchiveFromReader(lr)
+	archiveBytes, err := io.ReadAll(lr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to io.ReadAll: %w", err)
+	}
+
+	if len(archiveBytes) == 0 {
+		return nil, errors.New("archive is empty")
+	}
+
+	ar, err := unarr.NewArchiveFromMemory(archiveBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unarr.NewArchiveFromReader: %w", err)
 	}
