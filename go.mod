@@ -10,7 +10,7 @@ require (
 	github.com/gen2brain/go-unarr v0.2.4
 	github.com/go-chi/chi/v5 v5.2.3
 	github.com/go-chi/cors v1.2.2
-	github.com/samber/slog-chi v1.16.0
+	github.com/samber/slog-chi v1.16.1
 	github.com/samber/slog-multi v1.4.1
 	github.com/stretchr/testify v1.11.1
 	github.com/wlynxg/chardet v1.0.3
