@@ -265,7 +265,7 @@ func (s *stremioService) GetSubtitle(ctx context.Context, subdivxID string) ([]b
 	}
 
 	if decoder != nil {
-		tr := transform.NewReader(bytes.NewReader(subtitle.Data), charmap.Windows1252.NewDecoder())
+		tr := transform.NewReader(bytes.NewReader(subtitle.Data), decoder)
 		data, err := io.ReadAll(tr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to io.ReadAll when transforming subtitle encoding: %w", err)
