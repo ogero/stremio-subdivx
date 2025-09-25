@@ -248,6 +248,8 @@ func (s *stremioService) GetSubtitle(ctx context.Context, subdivxID string) ([]b
 	ctx, span := trace.SpanFromContext(ctx).TracerProvider().Tracer("").Start(ctx, "internal.StremioService.GetSubtitle")
 	defer span.End()
 
+	common.SubtitlesDownloadsTotalIncr(ctx)
+
 	subtitle, err := s.subdivx.GetSubtitle(ctx, subdivxID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to subdivx.Subdivx.GetSubtitle: %w", err)

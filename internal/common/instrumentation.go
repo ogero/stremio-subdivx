@@ -98,6 +98,9 @@ func InitInstrumentation(serviceName, serviceVersion, serviceEnvironment, export
 // CacheGetsTotalIncr increases in 1 a metric for tracking cache hits and misses
 var CacheGetsTotalIncr func(ctx context.Context, keyPrefix, result string)
 
+// SubtitlesDownloadsTotalIncr increases in 1 a metric for tracking subtitles downloads
+var SubtitlesDownloadsTotalIncr func(ctx context.Context)
+
 func createCustomMeters(serviceName, serviceVersion, serviceEnvironment string) error {
 	meter := otel.Meter(serviceName)
 	var err error
@@ -111,6 +114,16 @@ func createCustomMeters(serviceName, serviceVersion, serviceEnvironment string) 
 			attribute.String(string(semconv.ServiceVersionKey), serviceVersion),
 			attribute.String("key.prefix", keyPrefix),
 			attribute.String("result", result),
+		))
+	}
+	subtitlesDownloadsTotal, err := meter.Int64Counter("subtitles_downloads_total")
+	if err != nil {
+		return fmt.Errorf("failed to create custom meter: %w", err)
+	}
+	SubtitlesDownloadsTotalIncr = func(ctx context.Context) {
+		subtitlesDownloadsTotal.Add(ctx, 1, metric2.WithAttributes(
+			attribute.String(string(semconv.DeploymentEnvironmentNameKey), serviceEnvironment),
+			attribute.String(string(semconv.ServiceVersionKey), serviceVersion),
 		))
 	}
 
