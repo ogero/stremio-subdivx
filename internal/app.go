@@ -1,13 +1,13 @@
 package internal
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/ogero/stremio-subdivx/internal/common"
@@ -18,7 +18,7 @@ import (
 
 // App represents the main application structure that holds the Stremio service and addon host information.
 type App struct {
-	StremioService  StremioService
+	StremioService  *StremioService
 	StremioManifest *stremio.Manifest
 	AddonHost       string
 }
@@ -34,7 +34,7 @@ Parameters:
 Returns:
   - A pointer to the newly created App instance.
 */
-func NewApp(stremioService StremioService, stremioManifest *stremio.Manifest, addonHost string) (*App, error) {
+func NewApp(stremioService *StremioService, stremioManifest *stremio.Manifest, addonHost string) (*App, error) {
 	return &App{
 		StremioService:  stremioService,
 		StremioManifest: stremioManifest,
@@ -55,7 +55,12 @@ func (a *App) ManifestHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 
-	b, _ := json.Marshal(a.StremioManifest)
+	manifest := *a.StremioManifest
+	if apiKeyFromUserConfig(chi.URLParam(r, "userConfig")) != "" {
+		manifest.BehaviorHints.ConfigurationRequired = false
+	}
+
+	b, _ := json.Marshal(manifest)
 	_, err := w.Write(b)
 	if err != nil {
 		common.Log.ErrorContext(ctx, "Failed to write response", "err", err)
@@ -63,6 +68,29 @@ func (a *App) ManifestHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+}
+
+func apiKeyFromUserConfig(userConfig string) string {
+	if userConfig == "" {
+		return ""
+	}
+
+	decoded, err := base64.RawURLEncoding.DecodeString(userConfig)
+	if err != nil {
+		decoded, err = base64.URLEncoding.DecodeString(userConfig)
+		if err != nil {
+			return ""
+		}
+	}
+
+	var config struct {
+		APIKey string `json:"apiKey"`
+	}
+	if err = json.Unmarshal(decoded, &config); err != nil {
+		return ""
+	}
+
+	return strings.TrimSpace(config.APIKey)
 }
 
 /*
@@ -128,7 +156,16 @@ func (a *App) SubtitlesHandler(w http.ResponseWriter, r *http.Request) {
 		common.Log.WarnContext(ctx, "Failed to url.Values.Get(filename)", "err", fmt.Errorf("filename not found"))
 	}
 
-	subtitles, err := a.StremioService.GetSubtitles(ctx, paramsType, imdbID, seasonNumber, episodeNumber, queryFilename)
+	userConfig := chi.URLParam(r, "userConfig")
+	apiKey := apiKeyFromUserConfig(userConfig)
+	if apiKey == "" {
+		common.Log.WarnContext(ctx, "Failed to apiKeyFromUserConfig", "err", fmt.Errorf("api key not found"))
+		span.RecordError(fmt.Errorf("api key not found"))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	subtitles, err := a.StremioService.GetSubtitles(ctx, apiKey, paramsType, imdbID, seasonNumber, episodeNumber, queryFilename)
 	if err != nil {
 		common.Log.ErrorContext(ctx, "Failed to StremioService.GetSubtitles", "err", err)
 		span.RecordError(err)
@@ -143,18 +180,12 @@ func (a *App) SubtitlesHandler(w http.ResponseWriter, r *http.Request) {
 		response.Subtitles = append(response.Subtitles, stremio.Subtitle{
 			ID:   id,
 			Lang: subtitles.Lang,
-			URL:  fmt.Sprintf("%s/subdivx/%s", a.AddonHost, id),
+			URL:  fmt.Sprintf("%s/%s/subx/%s", a.AddonHost, userConfig, id),
 		})
 	}
 
-	if subtitles.Year < time.Now().Year()-1 && len(subtitles.IDs) > 1 {
-		w.Header().Set("CDN-Cache-Control", "public, max-age=1296000")
-		w.Header().Set("Cache-Control", "public, max-age=1296000")
-	} else {
-		w.Header().Set("CDN-Cache-Control", "public, max-age=120")
-		w.Header().Set("Cache-Control", "public, max-age=120")
-	}
-
+	w.Header().Set("CDN-Cache-Control", "public, max-age=600")
+	w.Header().Set("Cache-Control", "public, max-age=600")
 	w.Header().Set("Content-Type", "application/json")
 
 	err = json.NewEncoder(w).Encode(response)
@@ -166,26 +197,34 @@ func (a *App) SubtitlesHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 /*
-SubdivxSubtitleHandler handles requests for a specific subtitle by ID.
+SubXSubtitleHandler handles requests for a specific subtitle by ID.
 
 This method validates the subtitle ID, fetches the subtitle data, and writes it to the response with the appropriate content type.
 */
-func (a *App) SubdivxSubtitleHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) SubXSubtitleHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	span := trace.SpanFromContext(ctx)
 
-	common.Log.DebugContext(ctx, "SubdivxSubtitleHandler")
+	common.Log.DebugContext(ctx, "SubXSubtitleHandler")
+
+	apiKey := apiKeyFromUserConfig(chi.URLParam(r, "userConfig"))
+	if apiKey == "" {
+		common.Log.WarnContext(ctx, "Failed to apiKeyFromUserConfig", "err", fmt.Errorf("api key not found"))
+		span.RecordError(fmt.Errorf("api key not found"))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 
 	paramsID := chi.URLParam(r, "id")
-	if err := common.ValidateSubdivxSubtitleID(paramsID); err != nil {
-		common.Log.WarnContext(ctx, "Failed to common.ValidateSubdivxSubtitleID", "err", err)
+	if err := common.ValidateSubXSubtitleID(paramsID); err != nil {
+		common.Log.WarnContext(ctx, "Failed to common.ValidateSubXSubtitleID", "err", err)
 		span.RecordError(err)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 	span.SetAttributes(attribute.String("param.id", paramsID))
 
-	data, err := a.StremioService.GetSubtitle(ctx, paramsID)
+	data, err := a.StremioService.GetSubtitle(ctx, apiKey, paramsID)
 	if err != nil {
 		common.Log.ErrorContext(ctx, "Failed to StremioService.GetSubtitle", "err", err)
 		span.RecordError(err)

@@ -3,10 +3,10 @@ package common
 import (
 	"errors"
 	"regexp"
-	"strconv"
 )
 
 var imdbTitleIDRE = regexp.MustCompile(`^tt\d+$`)
+var subxSubtitleIDRE = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // ValidateIMDBTitleID checks if the given IMDB title ID is valid.
 // It ensures the title starts with 'tt' followed by a numeric suffix.
@@ -29,16 +29,10 @@ func ValidateSubtitleType(t string) error {
 	return nil
 }
 
-// ValidateSubdivxSubtitleID checks if the given Subdivx subtitle ID is valid.
-// It ensures the ID is a numeric value.
-func ValidateSubdivxSubtitleID(id string) error {
-	v, err := strconv.Atoi(id)
-	if err != nil {
-		return errors.New("invalid Subdivx subtitle id, not a number")
-	}
-
-	if v <= 0 {
-		return errors.New("invalid Subdivx subtitle id, less than or equal to 0")
+// ValidateSubXSubtitleID checks if the given SubX subtitle ID is valid.
+func ValidateSubXSubtitleID(id string) error {
+	if !subxSubtitleIDRE.MatchString(id) {
+		return errors.New("invalid SubX subtitle id")
 	}
 
 	return nil

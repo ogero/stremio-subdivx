@@ -1,9 +1,119 @@
+import {useEffect, useMemo, useState} from "react";
 import {Coffee, Download, Star} from "lucide-react";
-import {Link} from 'react-router-dom';
+import {Link, useLocation, useParams} from 'react-router-dom';
 import {withTranslation} from 'react-i18next';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "./ui/dialog";
+import {Button} from "./ui/button";
+import {Input} from "./ui/input";
 
+
+const decodeConfigApiKey = (encodedConfig?: string) => {
+  if (!encodedConfig) {
+    return "";
+  }
+
+  try {
+    const base64 = encodedConfig
+      .replace(/-/g, "+")
+      .replace(/_/g, "/")
+      .padEnd(Math.ceil(encodedConfig.length / 4) * 4, "=");
+    const binary = atob(base64);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    const config = JSON.parse(new TextDecoder().decode(bytes));
+
+    return typeof config.apiKey === "string" ? config.apiKey : "";
+  } catch {
+    return "";
+  }
+};
 
 const Hero = ({t}) => {
+  const {userConfig} = useParams();
+  const {pathname} = useLocation();
+  const isConfigureRoute = pathname.endsWith("/configure");
+  const configuredApiKey = useMemo(() => decodeConfigApiKey(userConfig), [userConfig]);
+  const [apiKey, setApiKey] = useState(configuredApiKey);
+  const [isInstallModalOpen, setIsInstallModalOpen] = useState(isConfigureRoute || Boolean(configuredApiKey));
+
+  useEffect(() => {
+    if (!isConfigureRoute && !configuredApiKey) {
+      return;
+    }
+
+    setApiKey(configuredApiKey);
+    setIsInstallModalOpen(true);
+  }, [configuredApiKey, isConfigureRoute]);
+
+  const clearAndCloseModal = () => {
+    setIsInstallModalOpen(false);
+    setApiKey("");
+  };
+
+  const handleInstallModalOpenChange = (open) => {
+    setIsInstallModalOpen(open);
+    if (!open) {
+      setApiKey("");
+    }
+  };
+
+  const encodedConfig = (() => {
+    const trimmedApiKey = apiKey.trim();
+    if (!trimmedApiKey) {
+      return "";
+    }
+
+    const configJson = JSON.stringify({apiKey: trimmedApiKey});
+    const bytes = new TextEncoder().encode(configJson);
+    const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
+    return btoa(binary)
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/g, "");
+  })();
+
+  const manifestPath = encodedConfig ? `/${encodedConfig}/manifest.json` : "/manifest.json";
+  const installUrl = `stremio://${window.location.host}${manifestPath}`;
+  const clipboardUrl = `${window.location.origin}${manifestPath}`;
+  const manualManifestUrl = encodedConfig ? clipboardUrl : `${window.location.origin}/manifest.json`;
+
+  const handleInstall = () => {
+    if (!encodedConfig) {
+      return;
+    }
+
+    window.location.href = installUrl;
+    clearAndCloseModal();
+  };
+
+  const handleCopy = async () => {
+    if (!encodedConfig) {
+      return;
+    }
+
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(clipboardUrl);
+      return;
+    }
+
+    const fallbackInput = document.createElement("textarea");
+    fallbackInput.value = clipboardUrl;
+    fallbackInput.setAttribute("readonly", "");
+    fallbackInput.style.position = "absolute";
+    fallbackInput.style.left = "-9999px";
+    document.body.appendChild(fallbackInput);
+    fallbackInput.select();
+    document.execCommand("copy");
+    document.body.removeChild(fallbackInput);
+  };
+
   return (
     <section className="min-h-screen flex items-center justify-center bg-gradient-to-br from-black via-gray-900 to-purple-900 relative overflow-hidden">
       {/* Animated background elements */}
@@ -31,13 +141,56 @@ const Hero = ({t}) => {
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center space-y-4 sm:space-y-0 sm:space-x-6 animate-fade-in">
-            <Link to='stremio://stremio-subdivx.xor.ar/manifest.json'>
-              <button
-                className="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-8 py-4 rounded-xl font-semibold text-lg hover:shadow-lg hover:shadow-purple-500/25 transition-all duration-300 hover:scale-105 flex items-center space-x-2">
-                <Download size={20}/>
-                <span>{t('Install Now')}</span>
-              </button>
-            </Link>
+            <Dialog open={isInstallModalOpen} onOpenChange={handleInstallModalOpenChange}>
+              <DialogTrigger asChild>
+                <button
+                  className="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-8 py-4 rounded-xl font-semibold text-lg hover:shadow-lg hover:shadow-purple-500/25 transition-all duration-300 hover:scale-105 flex items-center space-x-2"
+                >
+                  <Download size={20}/>
+                  <span>{t('Install Now')}</span>
+                </button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>{t('Install with SubX API Key')}</DialogTitle>
+                  <DialogDescription>
+                    {t('Enter your SubX API Key to generate your install link. You can get one at https://subx-api.duckdns.org/.')}
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="py-2">
+                  <Input
+                    value={apiKey}
+                    onChange={(event) => setApiKey(event.target.value)}
+                    placeholder={t('SubX API Key')}
+                    autoFocus
+                  />
+                </div>
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={clearAndCloseModal}
+                  >
+                    {t('Cancel')}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleCopy}
+                    disabled={!apiKey.trim()}
+                  >
+                    {t('Copy')}
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={handleInstall}
+                    disabled={!apiKey.trim()}
+                  >
+                    {t('Install')}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
 
             <Link to={'https://cafecito.app/ogero'} rel={'noopener'} target={'_blank'}>
               <button className="border border-gray-600 text-white px-8 py-4 rounded-xl font-semibold text-lg hover:bg-white/10 transition-all duration-300 flex items-center space-x-2">
@@ -50,7 +203,7 @@ const Hero = ({t}) => {
           <div className="mt-12 p-6 bg-black/30 backdrop-blur-sm rounded-xl border border-gray-700">
             <p className="text-gray-300 mb-4">{t('Install manually')}</p>
             <div className="bg-gray-900 p-4 rounded-lg">
-              <code className="text-purple-400 font-mono">https://stremio-subdivx.xor.ar/manifest.json</code>
+              <code className="text-purple-400 font-mono">{manualManifestUrl}</code>
             </div>
           </div>
         </div>

@@ -2,7 +2,7 @@
 
 ## Description
 
-Stremio addon for getting subtitles from Subdivx.
+Stremio addon for getting subtitles from SubX API (search and download API for Subdivx).
 
 ### Website & Install
 

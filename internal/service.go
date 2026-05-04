@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"sort"
-	"strconv"
 	"sync"
 	"time"
 
@@ -17,8 +16,7 @@ import (
 	"github.com/ogero/stremio-subdivx/internal/cache"
 	"github.com/ogero/stremio-subdivx/internal/common"
 	"github.com/ogero/stremio-subdivx/internal/loki"
-	"github.com/ogero/stremio-subdivx/pkg/imdb"
-	"github.com/ogero/stremio-subdivx/pkg/subdivx"
+	"github.com/ogero/stremio-subdivx/pkg/subx"
 	"github.com/wlynxg/chardet"
 	"github.com/wlynxg/chardet/consts"
 	"go.opentelemetry.io/otel/attribute"
@@ -34,8 +32,6 @@ type Subtitles struct {
 	IDs []string
 	// Lang is the language of the subtitles.
 	Lang string
-	// Year is the year of the content the subtitles are for.
-	Year int
 }
 
 // Stats represents statistical data including search and download counts in the last 24 hours and instant title information.
@@ -48,25 +44,9 @@ type Stats struct {
 	TitleInstant string `json:"titleInstant"`
 }
 
-// StremioService defines methods for retrieving subtitles, either by IMDb ID, season, and episode, or by a specific Subdivx ID.
-type StremioService interface {
-	// Handler handles incoming HTTP requests via a websocket handler
-	http.Handler
-	// GetSubtitles retrieves subtitles for a given title type, IMDb ID, season, and episode; filename is used to sort results by relevance.
-	GetSubtitles(ctx context.Context, titleType string, imdbID string, season int, episode int, filename string) (*Subtitles, error)
-	// GetSubtitle retrieves a specific subtitle by its Subdivx ID.
-	GetSubtitle(ctx context.Context, subdivxID string) ([]byte, error)
-	// BroadcastStats updates and publishes statistical data to a websocket channel.
-	// Accepts a function to modify stats and returns an error if updating or publishing fails.
-	BroadcastStats(statsUpdater func(stats *Stats) error) error
-	// StartPollingStats begins the periodic fetching and broadcasting of statistical data at the specified interval.
-	StartPollingStats(interval time.Duration)
-}
-
-type stremioService struct {
+type StremioService struct {
 	statsWebsocketChannel string
-	imdb                  imdb.IMDB
-	subdivx               subdivx.Subdivx
+	subx                  *subx.SubX
 	loki                  loki.Loki
 
 	node             *centrifuge.Node
@@ -75,12 +55,11 @@ type stremioService struct {
 	stats            Stats
 }
 
-// NewStremioService creates a new instance of StremioService with the provided IMDb and Subdivx clients.
-func NewStremioService(statsWebsocketChannel string, imdb imdb.IMDB, subdivx subdivx.Subdivx, loki loki.Loki) StremioService {
-	svc := &stremioService{
+// NewStremioService creates a new instance of StremioService with the provided SubX client.
+func NewStremioService(statsWebsocketChannel string, subxClient *subx.SubX, loki loki.Loki) *StremioService {
+	svc := &StremioService{
 		statsWebsocketChannel: statsWebsocketChannel,
-		imdb:                  imdb,
-		subdivx:               subdivx,
+		subx:                  subxClient,
 		loki:                  loki,
 
 		statsMutex: &sync.Mutex{},
@@ -135,38 +114,96 @@ func NewStremioService(statsWebsocketChannel string, imdb imdb.IMDB, subdivx sub
 
 // GetSubtitles retrieves subtitles for a given title type, IMDb ID, season, and episode; filename is used to sort results by relevance
 // It uses caching to improve performance and reduce API calls.
-func (s *stremioService) GetSubtitles(ctx context.Context, titleType string, imdbID string, season int, episode int, filename string) (*Subtitles, error) {
+func (s *StremioService) GetSubtitles(ctx context.Context, subxAPIKey string, titleType string, imdbID string, season int, episode int, filename string) (*Subtitles, error) {
 
 	ctx, span := trace.SpanFromContext(ctx).TracerProvider().Tracer("").Start(ctx, "internal.StremioService.GetSubtitles")
 	defer span.End()
 
-	cacheResult := "hit"
-	cacheKey := fmt.Sprintf("imdb.title : %s", imdbID)
-	cacheTTL := 48 * time.Hour
-	imdbTitle, err := cache.Memoize[imdb.Title](cacheKey, cacheTTL, func() (*imdb.Title, error) {
-
-		cacheResult = "miss"
-		title, err := s.imdb.GetTitle(ctx, imdbID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to imdb.IMDB.GetTitle: %w", err)
-		}
-
-		return title, nil
-	})
-	span.SetAttributes(attribute.String("cache.imdb.title.result", cacheResult))
-	common.CacheGetsTotalIncr(ctx, "imdb.title", cacheResult)
-	if err != nil {
-		return nil, err
-	}
-
 	span.SetAttributes(attribute.String("imdb.id", imdbID))
-	span.SetAttributes(attribute.String("imdb.title", imdbTitle.Name))
 	span.SetAttributes(attribute.Int("imdb.season", season))
 	span.SetAttributes(attribute.Int("imdb.episode", episode))
 
+	searchLabel := imdbID
+	if titleType == "movie" {
+		searchLabel = fmt.Sprintf("%s movie", imdbID)
+	} else if season > 0 && episode > 0 {
+		searchLabel = fmt.Sprintf("%s S%02dE%02d", imdbID, season, episode)
+	}
+
+	cacheResult := "hit"
+	cacheKey := fmt.Sprintf("subx.subtitles : %s : %s : %d : %d", titleType, imdbID, season, episode)
+	cacheTTL := 24 * time.Hour
+	subxSubtitles, err := cache.Memoize[subx.Subtitles](cacheKey, cacheTTL, func() (*subx.Subtitles, error) {
+
+		cacheResult = "miss"
+
+		common.Log.InfoContext(ctx, "Searching SubX subtitles", "imdb_id", imdbID, "type", titleType, "season", season, "episode", episode)
+
+		subtitles, err := s.subx.SearchSubtitles(ctx, subxAPIKey, subx.SearchParams{
+			IMDBID: imdbID,
+			Limit:  50,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to subx.SubX.SearchSubtitles: %w", err)
+		}
+
+		if titleType == "series" && season > 0 && episode > 0 {
+			filteredSubtitles := make([]*subx.Subtitle, 0, len(subtitles.Subtitles))
+			for _, subtitle := range subtitles.Subtitles {
+				if subtitle.Season == season && subtitle.Episode == episode {
+					filteredSubtitles = append(filteredSubtitles, subtitle)
+				}
+			}
+			subtitles.TotalRecords = len(filteredSubtitles)
+			subtitles.Subtitles = filteredSubtitles
+		}
+
+		return subtitles, nil
+	})
+	span.SetAttributes(attribute.String("cache.subx.subtitles.result", cacheResult))
+	common.CacheGetsTotalIncr(ctx, "subx.subtitles", cacheResult)
+	if err != nil {
+		return nil, err
+	}
+	span.SetAttributes(attribute.Int("subx.total-records", subxSubtitles.TotalRecords))
+	span.SetAttributes(attribute.Int("subx.ids-count", len(subxSubtitles.Subtitles)))
+
+	type ScoredSubtitle struct {
+		ID    string
+		Score int
+	}
+
+	subxScoredSubtitles := make([]ScoredSubtitle, 0, len(subxSubtitles.Subtitles))
+	for _, subxSubtitle := range subxSubtitles.Subtitles {
+		subxScoredSubtitle := ScoredSubtitle{
+			ID:    subxSubtitle.ID,
+			Score: subxSubtitle.Score(filename),
+		}
+		subxScoredSubtitles = append(subxScoredSubtitles, subxScoredSubtitle)
+	}
+	sort.Slice(subxScoredSubtitles, func(i, j int) bool {
+		return subxScoredSubtitles[i].Score > subxScoredSubtitles[j].Score
+	})
+
+	ids := make([]string, len(subxScoredSubtitles))
+	scores := make([]int, len(subxScoredSubtitles))
+	for i, item := range subxScoredSubtitles {
+		ids[i] = item.ID
+		scores[i] = item.Score
+	}
+	common.Log.InfoContext(ctx, "Found subtitles", "title", searchLabel, "ids", ids, "scores", scores)
+
 	go func() {
+		titleInstant := searchLabel
+		if len(subxSubtitles.Subtitles) > 0 && subxSubtitles.Subtitles[0].Title != "" {
+			titleInstant = subxSubtitles.Subtitles[0].Title
+			if titleType == "series" && season > 0 && episode > 0 {
+				titleInstant = fmt.Sprintf("%s S%02dE%02d", titleInstant, season, episode)
+			}
+		}
+
 		err := s.BroadcastStats(func(data *Stats) error {
-			data.TitleInstant = imdbTitle.Name
+			data.TitleInstant = titleInstant
 			return nil
 		})
 		if err != nil {
@@ -174,85 +211,24 @@ func (s *stremioService) GetSubtitles(ctx context.Context, titleType string, imd
 		}
 	}()
 
-	var subdivxSearchTerm string
-	if titleType == "movie" {
-		subdivxSearchTerm = fmt.Sprintf("%s (%d)", imdbTitle.Name, imdbTitle.Year)
-	} else {
-		subdivxSearchTerm = fmt.Sprintf("%s S%02dE%02d", imdbTitle.Name, season, episode)
-	}
-
-	cacheResult = "hit"
-	cacheKey = fmt.Sprintf("subdivx.subtitles.v1 : %s", subdivxSearchTerm)
-	cacheTTL = 24 * time.Hour
-	subdivxSubtitles, err := cache.Memoize[subdivx.Subtitles](cacheKey, cacheTTL, func() (*subdivx.Subtitles, error) {
-
-		cacheResult = "miss"
-		token, err := s.subdivx.GetToken(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to subdivx.Subdivx.GetToken: %w", err)
-		}
-
-		subtitles, err := s.subdivx.GetSubtitles(ctx, token, subdivxSearchTerm)
-		if err != nil {
-			return nil, fmt.Errorf("failed to subdivx.Subdivx.GetSubtitles: %w", err)
-		}
-
-		return subtitles, nil
-	})
-	span.SetAttributes(attribute.String("cache.subdivx.subtitles.result", cacheResult))
-	common.CacheGetsTotalIncr(ctx, "subdivx.subtitles", cacheResult)
-	if err != nil {
-		return nil, err
-	}
-	span.SetAttributes(attribute.Int("subdivx.total-records", subdivxSubtitles.TotalRecords))
-	span.SetAttributes(attribute.Int("subdivx.ids-count", len(subdivxSubtitles.Subtitles)))
-
-	type ScoredSubtitle struct {
-		ID    int
-		Score int
-	}
-
-	subdivxScoredSubtitles := make([]ScoredSubtitle, 0, len(subdivxSubtitles.Subtitles))
-	for _, subdivxSubtitle := range subdivxSubtitles.Subtitles {
-		subdivxScoredSubtitle := ScoredSubtitle{
-			ID:    subdivxSubtitle.ID,
-			Score: subdivxSubtitle.Score(filename),
-		}
-		subdivxScoredSubtitles = append(subdivxScoredSubtitles, subdivxScoredSubtitle)
-	}
-	sort.Slice(subdivxScoredSubtitles, func(i, j int) bool {
-		return subdivxScoredSubtitles[i].Score > subdivxScoredSubtitles[j].Score
-	})
-
-	ids := make([]int, len(subdivxScoredSubtitles))
-	scores := make([]int, len(subdivxScoredSubtitles))
-	idsString := make([]string, len(subdivxScoredSubtitles))
-	for i, item := range subdivxScoredSubtitles {
-		ids[i] = item.ID
-		scores[i] = item.Score
-		idsString[i] = strconv.Itoa(item.ID)
-	}
-	common.Log.InfoContext(ctx, "Found subtitles", "title", subdivxSearchTerm, "ids", ids, "scores", scores)
-
 	return &Subtitles{
-		IDs:  idsString,
+		IDs:  ids,
 		Lang: "spa",
-		Year: imdbTitle.Year,
 	}, nil
 
 }
 
-// GetSubtitle retrieves a specific subtitle by its Subdivx ID.
-func (s *stremioService) GetSubtitle(ctx context.Context, subdivxID string) ([]byte, error) {
+// GetSubtitle retrieves a specific subtitle by its SubX ID.
+func (s *StremioService) GetSubtitle(ctx context.Context, subxAPIKey string, subxID string) ([]byte, error) {
 
 	ctx, span := trace.SpanFromContext(ctx).TracerProvider().Tracer("").Start(ctx, "internal.StremioService.GetSubtitle")
 	defer span.End()
 
 	common.SubtitlesDownloadsTotalIncr(ctx)
 
-	subtitle, err := s.subdivx.GetSubtitle(ctx, subdivxID)
+	subtitle, err := s.subx.DownloadSubtitle(ctx, subxAPIKey, subxID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to subdivx.Subdivx.GetSubtitle: %w", err)
+		return nil, fmt.Errorf("failed to subx.SubX.DownloadSubtitle: %w", err)
 	}
 
 	fileEncoding := chardet.Detect(subtitle.Data).Encoding
@@ -280,7 +256,7 @@ func (s *stremioService) GetSubtitle(ctx context.Context, subdivxID string) ([]b
 
 // BroadcastStats updates and publishes statistical data to a websocket channel.
 // Accepts a function to modify stats and returns an error if updating or publishing fails.
-func (s *stremioService) BroadcastStats(statsUpdater func(stats *Stats) error) error {
+func (s *StremioService) BroadcastStats(statsUpdater func(stats *Stats) error) error {
 	stats, err := func() (Stats, error) {
 		s.statsMutex.Lock()
 		defer s.statsMutex.Unlock()
@@ -308,7 +284,7 @@ func (s *stremioService) BroadcastStats(statsUpdater func(stats *Stats) error) e
 }
 
 // StartPollingStats begins the periodic fetching and broadcasting of statistical data at the specified interval.
-func (s *stremioService) StartPollingStats(interval time.Duration) {
+func (s *StremioService) StartPollingStats(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	for ; true; <-ticker.C {
 		searches, err := s.loki.GetSearches24()
@@ -335,7 +311,7 @@ func (s *stremioService) StartPollingStats(interval time.Duration) {
 }
 
 // ServeHTTP handles incoming HTTP requests via a websocket handler
-func (s *stremioService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (s *StremioService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	newCtx := centrifuge.SetCredentials(ctx, &centrifuge.Credentials{})

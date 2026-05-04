@@ -23,11 +23,12 @@ import (
 	"github.com/ogero/stremio-subdivx/internal/cache"
 	"github.com/ogero/stremio-subdivx/internal/common"
 	"github.com/ogero/stremio-subdivx/internal/loki"
-	"github.com/ogero/stremio-subdivx/pkg/imdb"
 	"github.com/ogero/stremio-subdivx/pkg/stremio"
-	"github.com/ogero/stremio-subdivx/pkg/subdivx"
+	"github.com/ogero/stremio-subdivx/pkg/subx"
 	slogchi "github.com/samber/slog-chi"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type config struct {
@@ -35,7 +36,7 @@ type config struct {
 	ServerListenAddr     string `env:"SERVER_LISTEN_ADDR" envDefault:":3593"`
 	ServiceName          string `env:"SERVICE_NAME" envDefault:"stremio-subdivx"`
 	ServiceEnvironment   string `env:"SERVICE_ENVIRONMENT" envDefault:"lcl"`
-	ServiceVersion       string `env:"SERVICE_VERSION" envDefault:"v0.0.11"`
+	ServiceVersion       string `env:"SERVICE_VERSION" envDefault:"v0.0.12"`
 	OtelExporterEndpoint string `env:"OTEL_EXPORTER_ENDPOINT" envDefault:"127.0.0.1:4317"`
 	LokiHost             string `env:"LOKI_HOST" envDefault:"http://127.0.0.1:3100"`
 	StatsWSChannel       string `env:"STATS_WS_CHANNEL" envDefault:"stremio-subdivx:stats"`
@@ -65,6 +66,10 @@ func main() {
 		Catalogs:    []stremio.CatalogItem{},
 		IDPrefixes:  []string{"tt"},
 		Resources:   []string{"subtitles"},
+		BehaviorHints: stremio.BehaviorHints{
+			Configurable:          true,
+			ConfigurationRequired: true,
+		},
 	}
 
 	err = cache.InitCache(slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -81,8 +86,7 @@ func main() {
 
 	stremioService := internal.NewStremioService(
 		cfg.StatsWSChannel,
-		imdb.NewStalkrIMDB(),
-		subdivx.NewSubdivx(),
+		subx.NewSubX(),
 		loki.NewLoki(cfg.LokiHost),
 	)
 
@@ -99,18 +103,6 @@ func main() {
 		common.Log.Error("Failed to fs.Sub", "err", err)
 	}
 
-	handlersFilter := func(r *http.Request) bool {
-		if r.Method == http.MethodGet &&
-			(r.URL.Path == "/" ||
-				r.URL.Path == "/manifest.json" ||
-				strings.HasPrefix(r.URL.Path, "/subtitles/") ||
-				strings.HasPrefix(r.URL.Path, "/subdivx/") ||
-				strings.HasPrefix(r.URL.Path, "/ws")) {
-			return true
-		}
-		return false
-	}
-
 	r := chi.NewRouter()
 	r.Use(slogchi.NewWithConfig(common.Log.WithGroup("http"), slogchi.Config{
 		Filters: []slogchi.Filter{func(_ middleware.WrapResponseWriter, r *http.Request) bool {
@@ -118,6 +110,7 @@ func main() {
 		}},
 	}))
 	r.Use(middleware.Recoverer)
+	r.Use(otelRoutePattern)
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: []string{"*"},
 		AllowedMethods: []string{"GET", "OPTIONS"},
@@ -137,10 +130,13 @@ func main() {
 		},
 		MaxAge: 300,
 	}))
-	r.Handle("GET /manifest.json", otelhttp.WithRouteTag("/manifest.json", http.HandlerFunc(app.ManifestHandler)))
-	r.Handle("GET /subtitles/{type}/{id}/*", otelhttp.WithRouteTag("/subtitles/{type}/{id}/*", http.HandlerFunc(app.SubtitlesHandler)))
-	r.Handle("GET /subdivx/{id}", otelhttp.WithRouteTag("/subdivx/{id}", http.HandlerFunc(app.SubdivxSubtitleHandler)))
-	r.Handle("GET /ws", otelhttp.WithRouteTag("/ws", http.HandlerFunc(app.WebsocketHandler)))
+	r.Handle("GET /manifest.json", http.HandlerFunc(app.ManifestHandler))
+	r.Handle("GET /{userConfig}/manifest.json", http.HandlerFunc(app.ManifestHandler))
+	r.Handle("GET /{userConfig}/subtitles/{type}/{id}/*", http.HandlerFunc(app.SubtitlesHandler))
+	r.Handle("GET /{userConfig}/subx/{id}", http.HandlerFunc(app.SubXSubtitleHandler))
+	r.Handle("GET /ws", http.HandlerFunc(app.WebsocketHandler))
+	r.Handle("GET /configure", spaIndexHandler(distFS))
+	r.Handle("GET /{userConfig}/configure", spaIndexHandler(distFS))
 	r.Handle("/*", http.FileServer(http.FS(distFS)))
 
 	// Listen app
@@ -182,4 +178,55 @@ func main() {
 	}
 
 	common.Log.Info("Bye!")
+}
+
+func handlersFilter(r *http.Request) bool {
+	if r.Method != http.MethodGet {
+		return false
+	}
+
+	path := r.URL.Path
+	if path == "/" || path == "/ws" || path == "/manifest.json" || path == "/configure" {
+		return true
+	}
+
+	_, pathAfterUserConfig, ok := strings.Cut(strings.TrimPrefix(path, "/"), "/")
+	if !ok {
+		return false
+	}
+
+	return pathAfterUserConfig == "manifest.json" ||
+		pathAfterUserConfig == "configure" ||
+		strings.HasPrefix(pathAfterUserConfig, "subtitles/") ||
+		strings.HasPrefix(pathAfterUserConfig, "subx/")
+}
+
+func otelRoutePattern(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r)
+
+		route := r.Pattern
+		if route == "" {
+			route = chi.RouteContext(r.Context()).RoutePattern()
+		}
+		if route == "" {
+			return
+		}
+
+		r.Pattern = route
+		trace.SpanFromContext(r.Context()).SetAttributes(attribute.String("http.route", route))
+	})
+}
+
+func spaIndexHandler(distFS fs.FS) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		index, err := fs.ReadFile(distFS, "index.html")
+		if err != nil {
+			http.Error(w, "index.html not found", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(index)
+	}
 }
