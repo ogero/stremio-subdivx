@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -288,11 +289,11 @@ func (s *StremioService) StartPollingStats(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	for ; true; <-ticker.C {
 		searches, err := s.loki.GetSearches24()
-		if err != nil {
+		if err != nil && !errors.Is(err, loki.ErrNoResults) {
 			common.Log.Error("failed to get loki.Loki.GetSearches24", "err", err)
 		}
 		downloads, err := s.loki.GetDownloads24()
-		if err != nil {
+		if err != nil && !errors.Is(err, loki.ErrNoResults) {
 			common.Log.Error("failed to get loki.Loki.GetDownloads24", "err", err)
 		}
 		err = s.BroadcastStats(func(stats *Stats) error {

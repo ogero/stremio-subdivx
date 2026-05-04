@@ -1,8 +1,6 @@
 package subx
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,6 +15,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/gen2brain/go-unarr"
 	"github.com/ogero/stremio-subdivx/pkg/transport"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -214,16 +213,13 @@ func (s *SubX) DownloadSubtitle(ctx context.Context, apiKey string, ID string) (
 
 	filename := downloadFilename(res.Header.Get("Content-Disposition"))
 	maxDownloadSize := maxSubtitleFileSize
-	if isZip(filename) {
+	if isArchive(filename) {
 		maxDownloadSize = maxSubtitleArchiveSize
 	}
 
-	data, err := io.ReadAll(io.LimitReader(res.Body, int64(maxDownloadSize)+1))
+	data, err := io.ReadAll(LimitReader(res.Body, int64(maxDownloadSize), ErrReadBeyondLimit))
 	if err != nil {
 		return nil, fmt.Errorf("failed to io.ReadAll: %w", err)
-	}
-	if len(data) > maxDownloadSize {
-		return nil, fmt.Errorf("subtitle download exceeds %d bytes", maxDownloadSize)
 	}
 	if len(data) == 0 {
 		return nil, errors.New("subtitle download is empty")
@@ -238,46 +234,58 @@ func (s *SubX) DownloadSubtitle(ctx context.Context, apiKey string, ID string) (
 }
 
 func extractSubtitle(data []byte, filename string) (*SubtitleContents, error) {
-	if !isZip(filename) {
+	if len(data) == 0 {
+		return nil, errors.New("subtitle download is empty")
+	}
+
+	if !isArchive(filename) {
+		if len(data) > maxSubtitleFileSize {
+			return nil, fmt.Errorf("subtitle file exceeds %d bytes: %w", maxSubtitleFileSize, ErrReadBeyondLimit)
+		}
 		return &SubtitleContents{
 			Name: filename,
 			Data: data,
 		}, nil
 	}
 
-	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	archive, err := unarr.NewArchiveFromMemory(data)
 	if err != nil {
-		return nil, fmt.Errorf("failed to zip.NewReader: %w", err)
+		return nil, fmt.Errorf("failed to unarr.NewArchiveFromMemory: %w", err)
 	}
+	defer archive.Close()
 
-	for _, file := range archive.File {
-		if file.FileInfo().IsDir() || !isSubtitle(file.Name) {
+	for {
+		err = archive.Entry()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, fmt.Errorf("failed to unarr.Archive.Entry: %w", err)
+		}
+
+		name := archive.Name()
+		if !isSubtitle(name) {
 			continue
 		}
 
-		rc, err := file.Open()
-		if err != nil {
-			return nil, fmt.Errorf("failed to zip.File.Open: %w", err)
+		if archive.Size() > maxSubtitleFileSize {
+			return nil, fmt.Errorf("subtitle file exceeds %d bytes: %w", maxSubtitleFileSize, ErrReadBeyondLimit)
 		}
 
-		data, err := io.ReadAll(io.LimitReader(rc, maxSubtitleFileSize+1))
-		closeErr := rc.Close()
+		subtitleData, err := archive.ReadAll()
 		if err != nil {
-			return nil, fmt.Errorf("failed to io.ReadAll: %w", err)
+			return nil, fmt.Errorf("failed to unarr.Archive.ReadAll: %w", err)
 		}
-		if closeErr != nil {
-			return nil, fmt.Errorf("failed to zip.File.Close: %w", closeErr)
+		if len(subtitleData) > maxSubtitleFileSize {
+			return nil, fmt.Errorf("subtitle file exceeds %d bytes: %w", maxSubtitleFileSize, ErrReadBeyondLimit)
 		}
-		if len(data) > maxSubtitleFileSize {
-			return nil, fmt.Errorf("subtitle file exceeds %d bytes", maxSubtitleFileSize)
-		}
-		if len(data) == 0 {
+		if len(subtitleData) == 0 {
 			return nil, errors.New("subtitle is empty")
 		}
 
 		return &SubtitleContents{
-			Name: path.Base(file.Name),
-			Data: data,
+			Name: path.Base(name),
+			Data: subtitleData,
 		}, nil
 	}
 
@@ -319,8 +327,13 @@ func isSubtitle(filename string) bool {
 	}
 }
 
-func isZip(filename string) bool {
-	return strings.EqualFold(path.Ext(filename), ".zip")
+func isArchive(filename string) bool {
+	switch strings.ToLower(path.Ext(filename)) {
+	case ".zip", ".rar", ".7z", ".tar":
+		return true
+	default:
+		return false
+	}
 }
 
 // alphaNumericDistinctLowercaseWords processes a string, extracts alphanumeric words, converts them to lowercase, and returns a slice of unique words in the order they appear.

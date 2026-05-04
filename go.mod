@@ -6,6 +6,7 @@ require (
 	github.com/caarlos0/env/v11 v11.4.1
 	github.com/centrifugal/centrifuge v0.38.0
 	github.com/dgraph-io/badger/v4 v4.9.1
+	github.com/gen2brain/go-unarr v0.2.4
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/go-chi/cors v1.2.2
 	github.com/samber/slog-chi v1.19.1

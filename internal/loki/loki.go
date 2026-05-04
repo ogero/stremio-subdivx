@@ -18,6 +18,8 @@ type Loki interface {
 	GetDownloads24() (int, error)
 }
 
+var ErrNoResults = fmt.Errorf("no results found")
+
 type stremioSubdivxLoki struct {
 	httpClient *http.Client
 	lokiHost   string
@@ -75,7 +77,7 @@ func (s *stremioSubdivxLoki) countLokiLogs(search string) (int, error) {
 	}
 
 	if len(lokiResp.Data.Result) != 1 {
-		return 0, fmt.Errorf("loki response data result length: %d", len(lokiResp.Data.Result))
+		return 0, ErrNoResults
 	}
 
 	if len(lokiResp.Data.Result[0].Value) != 2 {
