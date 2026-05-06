@@ -12,7 +12,7 @@ require (
 	github.com/samber/slog-chi v1.19.1
 	github.com/samber/slog-multi v1.8.0
 	github.com/stretchr/testify v1.11.1
-	github.com/wlynxg/chardet v1.0.4
+	github.com/wlynxg/chardet v1.0.5
 	go.opentelemetry.io/contrib/bridges/otelslog v0.18.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0
 	go.opentelemetry.io/otel v1.43.0
