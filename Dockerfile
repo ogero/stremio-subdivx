@@ -21,5 +21,6 @@ FROM scratch
 WORKDIR /app
 COPY --from=gobuilder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=gobuilder /app/stremio-subdivx /app/stremio-subdivx
+USER 1000:1000
 EXPOSE 3593
 CMD ["/app/stremio-subdivx"]
